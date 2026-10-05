@@ -44,7 +44,12 @@ jobs:
           node-version: 24
           cache: npm
       - run: npm ci
-      - run: npx claude -p --plugin-dir . "/exit"
+      - name: Generate Claude Code type declarations
+        run: |
+          npx claude -p --plugin-dir . "/exit"
+          test -f .claude-plugin/types/claude-code/index.d.ts
+        env:
+          MSYS_NO_PATHCONV: 1
       - run: npx claude plugin test .
       - run: for t in test/*.test.sh; do sh "$t" || exit 1; done
 
