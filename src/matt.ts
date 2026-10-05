@@ -23,6 +23,7 @@ export type MattInput = {
 export type MattResult = ReaderResult & {
   frontier: string[]
   decisions?: [number, number]
+  unreadableTickets: number
 }
 
 type TicketWork = {
@@ -385,6 +386,7 @@ export function readMatt(input: MattInput): MattResult {
     weak,
     notes,
     frontier,
+    unreadableTickets: input.unreadable.length,
     ...(decisions.length === 0 ? {} : { decisions: [resolvedDecisions, countedDecisions.length] }),
   }
 }
