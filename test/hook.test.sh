@@ -1,6 +1,7 @@
 #!/bin/sh
 # check evaluates its CONDITION string, so single-quoted expansions and variables used only there are intended.
-# shellcheck disable=SC2016,SC2034
+# Fault-injection PATH changes are deliberately confined to subshells.
+# shellcheck disable=SC2016,SC2034,SC2030,SC2031
 # shellcheck source=test/lib.sh
 . "$(dirname "$0")/lib.sh"
 
@@ -140,6 +141,269 @@ done
 
 # Headless.
 check 'headless prints nothing' '[ -z "$(CLAUDE_CODE_SESSION_ATTENDED=0 && run_hook startup "$r")" ]'
+
+# Cleanup: forgotten and expired notes go before printing, in files as src/notes.ts writes them.
+c=$tmp/c
+mkrepo "$c"
+git -C "$c" worktree add -q -b feat/live "$tmp/cl"
+C=$c/.git/whereami
+# put_feature ID FINISHED NOTE_DAYS [BRANCH...]: feature ID's folder under $C, note.json NOTE_DAYS days old.
+put_feature() {
+	pf_dir=$C/features/$(keyof "$1")
+	rm -rf "$pf_dir" && mkdir -p "$pf_dir" || return 1
+	printf '{}\n' >"$pf_dir/note.json"
+	age_file "$pf_dir/note.json" "$3"
+	if [ -n "$2" ]; then printf '%s\n' "$2"; fi >"$pf_dir/finished"
+	shift 3
+	printf '%s\n' "$@" >"$pf_dir/branches"
+}
+# put_branch KEY FEATURE NAME SEEN: a branch summary under $C belonging to FEATURE, for branch (or folder) NAME.
+put_branch() {
+	put_summary "$c/.git" "$1" "$4" 'whereami \u00B7 c' 'a record' '' &&
+		printf '%s\n' "$2" >"$C/branches/$1/feature" &&
+		printf '%s\n' "$3" >"$C/branches/$1/name"
+}
+put_feature forgot '' 1 feat/live
+put_branch feat%2Flive forgot feat/live "$now"
+check 'cleanup setup: live summary prints' 'has "$(run_hook startup "$tmp/cl")" "whereami \\u00B7 c"'
+touch "$C/features/forgot/forget"
+put_feature a/b '' 1 feat/ab
+put_branch feat%2Fab a/b feat/ab "$now"
+touch "$C/features/a%2Fb/forget"
+put_feature fin15 $((now - 15 * 86400)) 1 feat/live
+put_branch feat%2Ffin15 fin15 feat/fin15 "$now"
+put_feature fin13 $((now - 13 * 86400)) 1 feat/live
+put_branch feat%2Ffin13 fin13 feat/fin13 "$now"
+put_feature gone15 '' 15 feat/gone15
+put_branch feat%2Fgone15 gone15 feat/gone15 "$now"
+put_feature gone13 '' 13 feat/gone13
+put_branch feat%2Fgone13 gone13 feat/gone13 "$now"
+put_feature main15 '' 15 main
+put_feature active30 '' 30 main feat/live
+put_branch feat%2Fold other feat/old $((now - 15 * 86400))
+put_branch main other main $((now - 15 * 86400))
+put_branch "detached-$(keyof "$tmp/gone")" other "$tmp/gone" $((now - 15 * 86400))
+put_branch "detached-$(keyof "$tmp/cl")" other "$tmp/cl" $((now - 15 * 86400))
+put_feature .dot '' 1 feat/dot
+put_branch feat%2Fdot .dot feat/dot "$now"
+touch "$C/features/.dot/forget"
+git -C "$c" branch feat/locked
+put_feature locked '' 30 feat/locked
+rm "$C/features/locked/branches" && mkdir "$C/features/locked/branches"
+check 'unreadable branches setup: reading fails' '! cat "$C/features/locked/branches" >/dev/null 2>&1'
+put_branch feat%2Flocked locked feat/locked "$now"
+git -C "$c" branch detached-fix
+put_branch detached-fix other detached-fix $((now - 15 * 86400))
+put_feature notedir '' 1 main
+rm "$C/features/notedir/note.json" && mkdir "$C/features/notedir/note.json"
+touch "$C/features/notedir/note.json/old" && age_file "$C/features/notedir/note.json/old" 30
+check 'note.json folder setup: find lists an old file' '[ -n "$(find "$C/features/notedir/note.json" -mtime +13)" ]'
+put_feature nul '' 1 feat/live
+printf '1\000\n' >"$C/features/nul/finished"
+put_branch feat%2Fnul nul feat/nul "$now"
+check 'NUL in finished setup: the NUL is there' 'od -An -tx1 "$C/features/nul/finished" | grep -q " 00"'
+printf 'keep\n' >"$c/.git/keep.txt"
+out=$(run_hook startup "$tmp/cl")
+status=$?
+check 'cleanup: exit 0, forgotten summary not printed' '[ "$status" -eq 0 ] && [ -z "$out" ]'
+check 'forget: feature and its summary gone' '[ ! -e "$C/features/forgot" ] && [ ! -e "$C/branches/feat%2Flive" ]'
+check 'forget a/b: feature and its summary gone' '[ ! -e "$C/features/a%2Fb" ] && [ ! -e "$C/branches/feat%2Fab" ]'
+check 'finished 15 days ago: feature and summary gone' '[ ! -e "$C/features/fin15" ] && [ ! -e "$C/branches/feat%2Ffin15" ]'
+check 'finished 13 days ago: feature and summary kept' '[ -f "$C/features/fin13/note.json" ] && [ -f "$C/branches/feat%2Ffin13/seen" ]'
+check 'branches gone, note 15 days: feature and summary gone' '[ ! -e "$C/features/gone15" ] && [ ! -e "$C/branches/feat%2Fgone15" ]'
+check 'branches gone, note 13 days: feature and summary kept' '[ -f "$C/features/gone13/note.json" ] && [ -f "$C/branches/feat%2Fgone13/seen" ]'
+check 'only main, note 15 days: gone' '[ ! -e "$C/features/main15" ]'
+check 'main and a live branch, note 30 days: kept' '[ -f "$C/features/active30/note.json" ]'
+check 'summary of a deleted branch, seen 15 days ago: gone' '[ ! -e "$C/branches/feat%2Fold" ]'
+check 'summary of an existing branch, seen 15 days ago: kept' '[ -f "$C/branches/main/seen" ]'
+check 'detached summary of a deleted folder, seen 15 days ago: gone' '[ ! -e "$C/branches/detached-$(keyof "$tmp/gone")" ]'
+check 'detached summary of an existing folder, seen 15 days ago: kept' '[ -f "$C/branches/detached-$(keyof "$tmp/cl")/seen" ]'
+check 'forget .dot: feature and its summary gone' '[ ! -e "$C/features/.dot" ] && [ ! -e "$C/branches/feat%2Fdot" ]'
+check 'unreadable branches, note 30 days: feature and summary kept' \
+	'[ -f "$C/features/locked/note.json" ] && [ -f "$C/branches/feat%2Flocked/seen" ]'
+check 'summary of an existing branch named detached-fix, seen 15 days ago: kept' '[ -f "$C/branches/detached-fix/seen" ]'
+check 'note.json a fresh folder holding an old file, only main: kept' '[ -f "$C/features/notedir/note.json/old" ]'
+check 'NUL in finished, note 1 day, live branch: feature and summary kept' \
+	'[ -f "$C/features/nul/note.json" ] && [ -f "$C/branches/feat%2Fnul/seen" ]'
+check 'cleanup: common dir file kept' '[ "$(cat "$c/.git/keep.txt")" = keep ]'
+put_feature forgot '' 1 feat/live
+touch "$C/features/forgot/forget"
+check 'headless: cleanup runs' '(CLAUDE_CODE_SESSION_ATTENDED=0 && run_hook startup "$tmp/cl" >/dev/null) && [ ! -e "$C/features/forgot" ]'
+
+# A scanner failure, even after partial output, is not proof of NUL-free content; cat still reads the file.
+real_od=$(command -v od)
+tool_path=$PATH
+mkdir "$tmp/scanner-bin"
+cat >"$tmp/scanner-bin/od" <<'SH'
+#!/bin/sh
+for arg do
+	if [ "$arg" = "$SCAN_FILE" ]; then
+		printf 'failed\n' >>"$SCAN_LOG"
+		[ "$SCAN_MODE" = partial ] && printf ' 31 0a\n'
+		exit 2
+	fi
+done
+exec "$REAL_OD" "$@"
+SH
+chmod +x "$tmp/scanner-bin/od"
+for scan_mode in empty partial; do
+	put_feature scan '' 1 feat/live
+	printf '1\000\n' >"$C/features/scan/finished"
+	put_branch feat%2Fscan scan feat/scan "$now"
+	put_feature scan-control 1 1 feat/live
+	put_branch feat%2Fscan-control scan-control feat/scan-control "$now"
+	check "scanner $scan_mode setup: fails while cat reads the NUL file" '(
+		export PATH="$tmp/scanner-bin:$tool_path" REAL_OD="$real_od" SCAN_MODE="$scan_mode"
+		export SCAN_FILE="$C/features/scan/finished" SCAN_LOG="$tmp/scan.log"
+		od -An -v -tx1 "$SCAN_FILE" >/dev/null
+		[ "$?" -eq 2 ] && cat "$SCAN_FILE" >"$tmp/scan-copy" &&
+			cmp "$SCAN_FILE" "$tmp/scan-copy" && "$REAL_OD" -An -v -tx1 "$tmp/scan-copy" | grep -q " 00"
+	)'
+	out=$(
+		export PATH="$tmp/scanner-bin:$tool_path" REAL_OD="$real_od" SCAN_MODE="$scan_mode"
+		export SCAN_FILE="$C/features/scan/finished" SCAN_LOG="$tmp/scan.log"
+		: >"$SCAN_LOG"
+		run_hook startup "$tmp/cl"
+	)
+	status=$?
+	check "scanner $scan_mode failure: feature and summary kept; valid expiry removed" \
+		'[ "$status" -eq 0 ] && [ -s "$tmp/scan.log" ] &&
+		[ -f "$C/features/scan/note.json" ] && [ -f "$C/branches/feat%2Fscan/seen" ] &&
+		[ ! -e "$C/features/scan-control" ] && [ ! -e "$C/branches/feat%2Fscan-control" ]'
+done
+
+# A forgotten feature and its summary that cannot be removed: the summary stays on disk and is not printed.
+put_feature stuck '' 1 feat/live
+touch "$C/features/stuck/forget"
+put_branch feat%2Flive stuck feat/live "$now"
+chmod 555 "$C/features/stuck" "$C/branches/feat%2Flive"
+if [ -w "$C/features/stuck" ] || [ -w "$C/branches/feat%2Flive" ]; then
+	printf 'skip - removal fails: read-only folders stay writable for this user\n'
+else
+	out=$(run_hook startup "$tmp/cl")
+	status=$?
+	check 'removal fails: forgotten summary kept on disk and not printed' \
+		'[ "$status" -eq 0 ] && [ -f "$C/features/stuck/forget" ] && [ -f "$C/branches/feat%2Flive/seen" ] && [ -z "$out" ]'
+fi
+chmod 755 "$C/features/stuck" "$C/branches/feat%2Flive"
+
+# A summary whose owner cannot be read may belong to a forgotten feature: it stays on disk and nothing prints.
+put_feature own '' 1 feat/live
+put_branch feat%2Flive own feat/live "$now"
+check 'unreadable owner setup: summary prints' 'has "$(run_hook startup "$tmp/cl")" "whereami \\u00B7 c"'
+rm "$C/branches/feat%2Flive/feature" && mkdir "$C/branches/feat%2Flive/feature"
+check 'unreadable owner setup: reading fails' '! cat "$C/branches/feat%2Flive/feature" >/dev/null 2>&1'
+touch "$C/features/own/forget"
+out=$(run_hook startup "$tmp/cl")
+check 'unreadable owner, feature forgotten: feature gone, summary kept, nothing printed' \
+	'[ ! -e "$C/features/own" ] && [ -f "$C/branches/feat%2Flive/seen" ] && [ -z "$out" ]'
+
+# A detached worktree in a folder this user cannot search is hidden, not gone: its old summary stays.
+git -C "$c" worktree add -q --detach "$tmp/hid/wt"
+put_branch "detached-$(keyof "$tmp/hid/wt")" other "$tmp/hid/wt" $((now - 15 * 86400))
+put_branch "detached-$(keyof "$tmp/gone")" other "$tmp/gone" $((now - 15 * 86400))
+chmod 000 "$tmp/hid"
+if [ -e "$tmp/hid/wt" ]; then
+	printf 'skip - hidden worktree: a mode 000 folder stays searchable for this user\n'
+else
+	run_hook startup "$tmp/cl" >/dev/null
+	check 'hidden detached worktree, seen 15 days ago: summary kept; a deleted one: gone' \
+		'[ -f "$C/branches/detached-$(keyof "$tmp/hid/wt")/seen" ] && [ ! -e "$C/branches/detached-$(keyof "$tmp/gone")" ]'
+fi
+chmod 755 "$tmp/hid"
+
+# A literal entry whose target cannot be resolved still exists in its accessible parent.
+loop="$tmp/worktree loop [*?]"
+ln -s "${loop##*/}" "$loop"
+put_branch "detached-$(keyof "$loop")" other "$loop" $((now - 15 * 86400))
+missing="$tmp/missing [*?]"
+mkdir "$tmp/missing x"
+put_branch "detached-$(keyof "$missing")" other "$missing" $((now - 15 * 86400))
+check 'looping worktree setup: parent accessible, entry exists, target lookup fails' \
+	'[ -d "$tmp" ] && [ -r "$tmp" ] && [ -x "$tmp" ] && [ -L "$loop" ] && [ ! -e "$loop" ]'
+run_hook startup "$tmp/cl" >/dev/null
+status=$?
+check 'looping detached worktree: summary kept; literally missing folder: gone' \
+	'[ "$status" -eq 0 ] && [ -f "$C/branches/detached-$(keyof "$loop")/seen" ] &&
+	[ ! -e "$C/branches/detached-$(keyof "$missing")" ]'
+
+# Even an accessible parent can fail during inspection; a failed listing is not an empty one.
+real_find=$(command -v find)
+mkdir "$tmp/find-bin" "$tmp/inspect" "$tmp/inspect-control"
+cat >"$tmp/find-bin/find" <<'SH'
+#!/bin/sh
+case $1 in "$FIND_PARENT" | "$FIND_PARENT/"*)
+	printf 'failed\n' >>"$FIND_LOG"
+	exit 2
+	;;
+esac
+exec "$REAL_FIND" "$@"
+SH
+chmod +x "$tmp/find-bin/find"
+put_branch "detached-$(keyof "$tmp/inspect/wt")" other "$tmp/inspect/wt" $((now - 15 * 86400))
+put_branch "detached-$(keyof "$tmp/inspect-control/wt")" other "$tmp/inspect-control/wt" $((now - 15 * 86400))
+check 'inspection failure setup: accessible parent cannot be listed' '(
+	export PATH="$tmp/find-bin:$tool_path" REAL_FIND="$real_find" FIND_PARENT="$tmp/inspect" FIND_LOG="$tmp/find.log"
+	[ -d "$FIND_PARENT" ] && [ -r "$FIND_PARENT" ] && [ -x "$FIND_PARENT" ] || exit 1
+	find "$FIND_PARENT" >/dev/null
+	[ "$?" -eq 2 ]
+)'
+out=$(
+	export PATH="$tmp/find-bin:$tool_path" REAL_FIND="$real_find" FIND_PARENT="$tmp/inspect" FIND_LOG="$tmp/find.log"
+	: >"$FIND_LOG"
+	run_hook startup "$tmp/cl"
+)
+status=$?
+check 'failed detached-parent inspection: summary kept; inspected missing control: gone' \
+	'[ "$status" -eq 0 ] && [ -f "$C/branches/detached-$(keyof "$tmp/inspect/wt")/seen" ] &&
+	[ -s "$tmp/find.log" ] &&
+	[ ! -e "$C/branches/detached-$(keyof "$tmp/inspect-control/wt")" ]'
+
+# An individual summary symlink must not publish a forgotten feature or change its outside target.
+put_feature linked '' 1 feat/live
+put_branch feat%2Flive linked feat/live "$now"
+check 'linked summary setup: the current summary prints before linking' \
+	'has "$(run_hook startup "$tmp/cl")" "whereami \\u00B7 c"'
+mv "$C/branches/feat%2Flive" "$tmp/linked-summary"
+cp -R "$tmp/linked-summary" "$tmp/linked-snapshot"
+ln -s "$tmp/linked-summary" "$C/branches/feat%2Flive"
+touch "$C/features/linked/forget"
+out=$(run_hook startup "$tmp/cl")
+status=$?
+check 'forgotten feature with linked current summary: feature gone, outside unchanged, exit 0, no output' \
+	'[ "$status" -eq 0 ] && [ ! -e "$C/features/linked" ] && [ -L "$C/branches/feat%2Flive" ] &&
+	diff -r "$tmp/linked-snapshot" "$tmp/linked-summary" && [ -z "$out" ]'
+
+# A symlinked features folder: cleanup deletes nothing, there or in branches.
+o=$tmp/outside
+mkdir -p "$o/forgot"
+touch "$o/forgot/forget"
+printf 'keep\n' >"$o/keep.txt"
+rm -rf "$C/features"
+ln -s "$o" "$C/features"
+put_branch feat%2Fold forgot feat/old $((now - 15 * 86400))
+run_hook startup "$tmp/cl" >/dev/null
+check 'symlinked features: nothing deleted' \
+	'[ -f "$o/keep.txt" ] && [ -f "$o/forgot/forget" ] && [ -f "$C/branches/feat%2Fold/seen" ]'
+
+# Git cannot read the refs (a broken packed-refs): an existing branch is unknown, not gone, so its note and summary stay.
+c=$tmp/p
+C=$c/.git/whereami
+mkrepo "$c"
+git -C "$c" branch feat/p
+git -C "$c" pack-refs --all
+printf 'not a ref\n' >>"$c/.git/packed-refs"
+git -C "$c" show-ref --verify --quiet refs/heads/feat/p 2>/dev/null
+status=$?
+check 'broken refs setup: git cannot tell whether feat/p exists' '[ "$status" -gt 1 ]'
+put_feature p '' 30 feat/p
+put_branch feat%2Fp p feat/p $((now - 15 * 86400))
+put_feature forgot '' 1 feat/p
+touch "$C/features/forgot/forget"
+run_hook startup "$c" >/dev/null
+check 'broken refs: cleanup runs' '[ ! -e "$C/features/forgot" ]'
+check 'broken refs, note 30 days, seen 15 days ago: feature and summary kept' \
+	'[ -f "$C/features/p/note.json" ] && [ -f "$C/branches/feat%2Fp/seen" ]'
 
 case "$(uname -s)" in
 MINGW* | MSYS*)
