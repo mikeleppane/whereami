@@ -32,6 +32,7 @@ const superpowers = (phase: Phase, overrides: Partial<SpResult> = {}): SpResult 
   notes: [],
   allComplete: false,
   ledgerSeen: false,
+  currentLedger: false,
   ...overrides,
 })
 

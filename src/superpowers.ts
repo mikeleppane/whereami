@@ -11,7 +11,11 @@ export type SpInput = {
   previous: LastSeen | null
   taskCommits: number[]
 }
-export type SpResult = ReaderResult & { allComplete: boolean; ledgerSeen: boolean }
+export type SpResult = ReaderResult & {
+  allComplete: boolean
+  ledgerSeen: boolean
+  currentLedger: boolean
+}
 
 const NOT_LEDGER = 'not a Superpowers ledger'
 const UNSUPPORTED_FILE = 'file over 1 MB or not text'
@@ -91,6 +95,7 @@ function baseResult(input: SpInput, items: ItemStatus[], phase: ReaderResult['ph
     notes,
     allComplete: false,
     ledgerSeen: input.ledger !== null || input.previous?.ledgerSeen === true,
+    currentLedger: false,
   }
 }
 
@@ -234,6 +239,7 @@ function readLedger(input: SpInput, ledger: Ledger): SpResult {
   const result = baseResult(input, items, allComplete ? 'review' : 'build')
   result.notes = notes
   result.allComplete = allComplete
+  result.currentLedger = true
   return result
 }
 

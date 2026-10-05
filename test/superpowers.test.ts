@@ -88,6 +88,14 @@ test('a clean completion records the parenthetical evidence and leaves other tas
   ])
 })
 
+test('a successfully read matching ledger marks its task items as current', () => {
+  const result = readSuperpowers(
+    makeInput(successfulRead('# SDD ledger — plan: docs/superpowers/plans/2026-10-05-auth.md')),
+  )
+
+  expect('currentLedger' in result ? result.currentLedger : undefined).toBe(true)
+})
+
 test('a completion with parked findings remains complete and records its parked count', () => {
   const result = readSuperpowers(
     makeInput(
