@@ -1,0 +1,10 @@
+{
+  "name": "whereami",
+  "version": "0.1.0",
+  "description": "Where was I? Progress and recovery for Superpowers and Matt Pocock's skills.",
+  "author": {
+    "name": "whereami contributors"
+  },
+  "license": "MIT",
+  "types": "./types/index.d.ts"
+}

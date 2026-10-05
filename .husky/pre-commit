@@ -1,0 +1,2 @@
+make fmt-check lint typecheck
+if command -v gitleaks >/dev/null; then gitleaks git --pre-commit --staged --redact; else echo "pre-commit: gitleaks not installed, skipped (CI runs it)"; fi

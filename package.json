@@ -1,0 +1,19 @@
+{
+  "name": "whereami",
+  "version": "1.0.0",
+  "private": true,
+  "license": "MIT",
+  "engines": {
+    "node": ">=24"
+  },
+  "scripts": {
+    "prepare": "husky"
+  },
+  "devDependencies": {
+    "@anthropic-ai/claude-code": "2.1.289",
+    "@biomejs/biome": "2.5.15",
+    "husky": "9.1.7",
+    "markdownlint-cli2": "0.23.3",
+    "typescript": "7.0.2"
+  }
+}

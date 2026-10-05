@@ -1,0 +1,22 @@
+{
+  "config": {
+    "default": true,
+    "MD013": false
+  },
+  "globs": [
+    "README.md",
+    "AGENTS.md",
+    "GLOSSARY.md",
+    "CHANGELOG.md",
+    "docs/adr/*.md",
+    "docs/agents/*.md",
+    "test/e2e/*.md"
+  ],
+  "ignores": [
+    "docs/superpowers",
+    "docs/reviews",
+    "docs/verification.md",
+    ".scratch",
+    "test/fixtures"
+  ]
+}
