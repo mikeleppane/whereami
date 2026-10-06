@@ -48,26 +48,48 @@ export function taskNumbers(commits: Commit[]): number[] {
 
 const literal = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
 
-// Keys of tickets a subject names by number (`01`, `#01`) or slug, each as a whole word in any script.
+const wholeWord = (w: string) =>
+  new RegExp(`(?:^|[^\\p{L}\\p{M}\\p{N}_])${literal(w)}(?![\\p{L}\\p{M}\\p{N}_])`, 'iu')
+function mentionedNumbers(subject: string): string[] {
+  const numbers: string[] = []
+  // Read numeric runs intact, so rejecting a date, version or time cannot expose one of its components.
+  for (const match of subject.matchAll(/#?\p{N}+(?:[-./:]\p{N}+)*/gu)) {
+    const token = match[0]
+    const marked = token.startsWith('#')
+    if (
+      (!marked && /[\p{L}\p{M}\p{N}_]$/u.test(subject.slice(0, match.index))) ||
+      /^[\p{L}\p{M}\p{N}_]/u.test(subject.slice(match.index + token.length))
+    )
+      continue
+    const value = marked ? token.slice(1) : token
+    if (/^\p{N}+$/u.test(value)) numbers.push(value)
+    // A hash explicitly introduces the written numbers of a range/list; do not invent intermediate tickets.
+    else if (marked && /^\p{N}+(?:-\p{N}+)+$/u.test(value)) numbers.push(...value.split('-'))
+  }
+  return numbers
+}
+
+// Keys named by standalone numbers, explicit hash references (including ranges/lists), or whole-word slugs.
 export function relatedKeys(commits: Commit[], tickets: Ticket[]): string[] {
+  const numbers = new Set(commits.flatMap((c) => mentionedNumbers(c.subject)))
   const keys = tickets
     .filter((t) => t.key !== '')
     .filter((t) => {
-      const words = [t.key, t.slug].filter((w) => w !== '').map(literal)
-      const named = new RegExp(
-        `(?:^|[^\\p{L}\\p{M}\\p{N}_])(?:${words.join('|')})(?![\\p{L}\\p{M}\\p{N}_])`,
-        'iu',
-      )
-      return commits.some((c) => named.test(c.subject))
+      const slug = t.slug === '' ? null : wholeWord(t.slug)
+      return numbers.has(t.key) || commits.some((c) => slug?.test(c.subject))
     })
     .map((t) => t.key)
   return [...new Set(keys)]
 }
 
 // Commits since an observed HEAD, or every commit when it was observed before the first one. null: unknown
-// (a head that is no commit id, git failed or its output was cut), never a count of 0.
-export async function commitsSince(io: Io, head: string | null): Promise<number | null> {
-  if (head !== null && !HEX.test(head)) return null
+// (a head git could not read at the start, one that is no commit id, git failed or its output was cut), never
+// a count of 0.
+export async function commitsSince(
+  io: Io,
+  head: string | null | undefined,
+): Promise<number | null> {
+  if (head === undefined || (head !== null && !HEX.test(head))) return null
   const lines = await gitLines(io, ['log', '--format=%H', head === null ? 'HEAD' : `${head}..HEAD`])
   return lines === null ? null : lines.filter((l) => l !== '').length
 }
@@ -212,20 +234,22 @@ export async function buildBranch(io: Io, note: Note, facts: RepoFacts): Promise
 
 // Spec section 5, "Where tickets are read". folder: repo-relative `.scratch/<f>`; build: buildBranch's ref. A
 // ticket committed on `build` is read from there, any other from the working tree (the current one, else the main
-// one when the current has no tickets). differsOn: other branches whose copy parses to another status; it never
-// overrides. unreadable: a ticket that could not be read; with `branch`, only that branch's copy could not be read
-// (so differsOn cannot speak for it); a copy missing there is no entry. null: git could not tell which tickets are
-// committed or what they hold (it failed or was cut), or the required main-worktree fallback is unknown.
-// Task 14 must keep that null as unknown evidence and suppress ticket creation, not pass [] to readMatt.
+// one when the current has no tickets). differsOn: every other local branch whose copy reads otherwise in any field
+// whereami reads; it never overrides. unreadable: a ticket that could not be read; with `branch`, only that
+// branch's copy could not be read (so differsOn cannot speak for it); a copy missing there is no entry.
+// othersUnknown: git could not list the other branches, so no difference can be told. null: git could not tell
+// which tickets are committed or what any copy holds (it failed or was cut), or the required
+// main-worktree fallback is unknown. Task 14 must keep that null as unknown evidence and suppress ticket creation,
+// not pass [] to readMatt.
 export async function readTickets(
   io: Io,
   folder: string,
   facts: RepoFacts,
   build: string,
-  otherBranches: string[],
 ): Promise<{
   tickets: (Ticket & { differsOn?: string[] })[]
   unreadable: { path: string; why: string; branch?: string }[]
+  othersUnknown: boolean
 } | null> {
   const issues = `${folder}/issues`
   const md = (names: string[]) => names.filter((n) => n.endsWith('.md'))
@@ -252,10 +276,18 @@ export async function readTickets(
     local = md(await io.list(dir))
   }
   const names = [...new Set([...committed, ...local])].sort()
-  const others = otherBranches.filter((b) => `refs/heads/${b}` !== build)
   // cat-file reads one spec per line: a spec holding a line break (in the folder or the name) cannot be asked,
   // so that copy is unreadable rather than splitting its line and shifting every later answer.
   const LINE_BREAK = /[\r\n]/
+  // Every other local branch, listed first so its copies join the one cat-file call of this refresh (spec
+  // section 8). A listing git cannot give leaves only the comparison unknown.
+  const refs =
+    names.length === 0
+      ? []
+      : await gitLines(io, ['for-each-ref', '--format=%(refname)', 'refs/heads/'])
+  const others = (refs ?? [])
+    .filter((ref) => ref.startsWith('refs/heads/') && ref !== build)
+    .map((ref) => ref.slice('refs/heads/'.length))
   const specs = [
     ...committed.map((n) => `${build}:${issues}/${n}`),
     ...others.flatMap((b) => names.map((n) => `refs/heads/${b}:${issues}/${n}`)),
@@ -268,6 +300,8 @@ export async function readTickets(
     LINE_BREAK.test(spec)
       ? { ok: false, why: 'line break in name' }
       : (blobs.get(spec) ?? { ok: false, why: 'error' })
+  // What whereami reads from a ticket: a copy reading otherwise in any of it differs.
+  const reading = (t: Ticket) => JSON.stringify([t.title, t.status, t.blockedBy, t.type])
 
   const tickets: (Ticket & { differsOn?: string[] })[] = []
   const unreadable: { path: string; why: string; branch?: string }[] = []
@@ -282,13 +316,13 @@ export async function readTickets(
     for (const b of others) {
       const copy = blob(`refs/heads/${b}:${path}`)
       if (copy.ok) {
-        if (ticket !== null && parseTicket(path, copy.text).status !== ticket.status)
+        if (ticket !== null && reading(parseTicket(path, copy.text)) !== reading(ticket))
           differsOn.push(b)
       } else if (copy.why !== 'missing') unreadable.push({ path, why: copy.why, branch: b })
     }
     if (ticket !== null) tickets.push(differsOn.length === 0 ? ticket : { ...ticket, differsOn })
   }
-  return { tickets, unreadable }
+  return { tickets, unreadable, othersUnknown: refs === null }
 }
 
 // Spec section 5, `merged`: a stored tip of the feature's own branches is an ancestor of the default branch.

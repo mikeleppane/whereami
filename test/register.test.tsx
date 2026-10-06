@@ -97,11 +97,18 @@ test('outside a repo the band is exactly what the plugins below drew', async ($,
   expect(await band($)).toEqual(['below'])
 })
 
+// HEAD as it is when the command starts, not as the last refresh saw it (a commit or worktree switch since).
 test('a typed library command naming a ticket is observed in the note with the branch and head', async ($, on) => {
   const ticket = '.scratch/demo/issues/01-t.md'
-  const w = world(on, { files: { [`/r/${ticket}`]: BOLD_READY_TICKET }, git: git(repo()) })
+  let head = 'b'.repeat(40)
+  const w = world(on, {
+    files: { [`/r/${ticket}`]: BOLD_READY_TICKET },
+    git: (args) =>
+      args.join(' ') === 'rev-parse --verify --quiet HEAD' ? `${head}\n` : git(repo())(args),
+  })
   on('command.run', () => ({ text: '' }))
   await start($, w.clock)
+  head = HEAD
   await typed($, 'mattpocock-skills:implement', ticket)
   await w.clock.advance(1000)
   const note = JSON.parse(w.written[`${W}/features/demo/note.json`] ?? '{}')
@@ -161,6 +168,14 @@ test('a skill start naming its document by absolute path before the first refres
   await typed($, 'superpowers:writing-plans', '/r/docs/superpowers/specs/2026-10-01-a-design.md')
   await w.clock.advance(1000)
   expect((await band($))[0]).toMatch(/^whereami · a · /)
+  // The start's own branch and HEAD, read then, not the facts no refresh had yet.
+  expect(JSON.parse(w.written[`${W}/features/a/note.json`] ?? '{}').observed).toContainEqual(
+    expect.objectContaining({
+      skill: 'superpowers:writing-plans',
+      branch: 'feat/auth',
+      head: HEAD,
+    }),
+  )
   await $.session.end({ reason: 'clear', sessionId: 's1', resume: { id: 's1' } })
   await w.clock.advance(1000)
   expect(await band($)).toEqual([CHOOSE, 'below'])
@@ -224,12 +239,15 @@ test('a plan Bash writes after a Write of another plan for the same spec is the 
   mtimes[first] = w.clock.now()
   await $.tool.call({ tool: 'Write', file_path: first, content: THREE_TASK_PLAN })
   await w.clock.advance(1000)
-  expect(await band($)).toEqual(['whereami · auth · plan 0/3', 'below'])
+  expect(await band($)).toEqual(['whereami · auth · plan · 3 tasks, no progress recorded', 'below'])
   files[second] = TWO_TASK_PLAN
   mtimes[second] = w.clock.now()
   await bash($)
   await w.clock.advance(1000)
-  expect(await band($)).toEqual(['whereami · auth · plan 0/2', 'below'])
+  expect(await band($)).toEqual(['whereami · auth · plan · 2 tasks, no progress recorded', 'below'])
+  expect(w.written[`${W}/branches/feat%2Fauth/message`]).toBe(
+    'whereami \\u00B7 auth \\u00B7 plan \\u00B7 2 tasks, no progress recorded\n.\n',
+  )
   expect(w.written[`${W}/branches/feat%2Fauth/detail`]).toContain(
     'next: /superpowers:subagent-driven-development docs/superpowers/plans/2026-10-06-auth.md',
   )
@@ -307,7 +325,13 @@ for (const evidence of ['typed', 'read'] as const) {
     expect(note.branches).toEqual(['feat/demo'])
     if (evidence === 'typed')
       expect(note.observed).toContainEqual(
-        expect.objectContaining({ skill: 'mattpocock-skills:grill-me', doc }),
+        // The worktree's branch at the start, not the one the last refresh saw.
+        expect.objectContaining({
+          skill: 'mattpocock-skills:grill-me',
+          doc,
+          branch: 'feat/demo',
+          head: HEAD,
+        }),
       )
     expect(w.written[`${W}/branches/feat%2Fdemo/feature`]).toBe('demo\n')
     expect((await band($))[0]).toMatch(/^whereami · demo · design/)

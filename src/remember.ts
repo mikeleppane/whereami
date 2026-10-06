@@ -12,7 +12,8 @@ export function snapshot(
   const tasks: Record<string, TaskSnap> = {}
   for (const item of sp.items) {
     const key = item.key.replace(/^Task /, '')
-    const evidence = item.evidence[0]?.text ?? ''
+    // The reader keeps status evidence in ledger order: the last entry is the status that won.
+    const evidence = item.evidence[item.evidence.length - 1]?.text ?? ''
     tasks[key] = {
       state: item.state,
       ...(item.reviewed === undefined ? {} : { reviewed: item.reviewed }),
@@ -139,10 +140,14 @@ export function remember(input: RememberInput, prevFinishedAt: number | null): R
     note.last = { ...note.last, phase: input.headline.phase }
   }
 
+  // Spec section 3: set at done or merged, empty otherwise. Unknown is no evidence of either: it keeps the time.
+  const { phase } = input.headline
+  const kept = planChanged ? null : prevFinishedAt
   const finishedAt =
-    (planChanged ? null : prevFinishedAt) ??
-    (input.headline.phase === 'done' || input.headline.phase === 'merged'
-      ? Math.floor(input.now.getTime() / 1000)
-      : null)
+    phase === 'done' || phase === 'merged'
+      ? (kept ?? Math.floor(input.now.getTime() / 1000))
+      : phase === 'unknown'
+        ? kept
+        : null
   return { note, finishedAt, notices }
 }

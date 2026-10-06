@@ -105,8 +105,8 @@ const isObserved = (v: unknown): v is Observed =>
   isStr(v.skill) &&
   isStr(v.doc) &&
   isStr(v.at) &&
-  (v.branch === null || isStr(v.branch)) &&
-  (v.head === null || isStr(v.head))
+  (v.branch === undefined || v.branch === null || isStr(v.branch)) &&
+  (v.head === undefined || v.head === null || isStr(v.head))
 
 const isTaskSnap = (v: unknown): v is TaskSnap =>
   isObj(v) &&

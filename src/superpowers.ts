@@ -283,8 +283,9 @@ export function readSuperpowers(input: SpInput): SpResult {
     return result
   }
 
+  // No ledger seen: "no progress recorded", so a heading gives its task no state (spec section 5).
   if (input.taskCommits === null) {
-    const result = baseResult(input, planItems(input), 'plan')
+    const result = baseResult(input, planItems(input, 'unknown'), 'plan')
     result.weak = true
     result.notes.push('commits unknown: git could not list this branch, so none can be ruled out')
     return result
@@ -310,5 +311,5 @@ export function readSuperpowers(input: SpInput): SpResult {
     return result
   }
 
-  return baseResult(input, planItems(input), 'plan')
+  return baseResult(input, planItems(input, 'unknown'), 'plan')
 }

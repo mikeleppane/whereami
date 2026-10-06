@@ -20,6 +20,8 @@ export type Headline = {
   phase: Phase
   weak: boolean
   count?: [number, number]
+  // Plan tasks while no ledger was ever seen: no progress recorded, neither zero nor done (spec section 5).
+  planned?: number
   decisions?: [number, number]
   blocked: number
 }
@@ -41,10 +43,15 @@ export function phaseOf(s: FeatureState): Headline {
     (item) => item.kind !== 'decision' && item.state === 'complete',
   ).length
 
+  const unrecorded = result !== null && result === s.sp && !s.sp.ledgerSeen
   return {
     phase,
     weak: result?.weak ?? false,
-    ...(result?.total === undefined ? {} : { count: [complete ?? 0, result.total] }),
+    ...(result?.total === undefined
+      ? {}
+      : unrecorded
+        ? { planned: result.total }
+        : { count: [complete ?? 0, result.total] }),
     ...(s.matt?.decisions === undefined ? {} : { decisions: s.matt.decisions }),
     blocked: result?.items.filter((item) => item.state === 'blocked').length ?? 0,
   }
@@ -112,7 +119,9 @@ export function nextAction(s: FeatureState, installed: Set<string>): NextAction 
     }
   }
 
-  if (s.sp?.phase === 'done' && s.merged !== true) {
+  // Not merged only on evidence: a squash merge is unknown, and default-branch work has no merged state
+  // (spec section 5).
+  if (s.sp?.phase === 'done' && s.merged === false) {
     return commandAction(
       'finish and merge this branch',
       'superpowers:finishing-a-development-branch',
@@ -167,6 +176,9 @@ export function nextAction(s: FeatureState, installed: Set<string>): NextAction 
       s.sp.docs.spec,
     )
   }
+
+  // A mixed feature takes its phase from the plan (spec section 5): no Matt row drafts work for it.
+  if (s.sp?.docs.plan !== undefined && s.matt !== null) return null
 
   const matt = s.matt
   if (
@@ -259,7 +271,7 @@ export function nextAction(s: FeatureState, installed: Set<string>): NextAction 
     return { text: 'cannot determine the next action: a ticket could not be read' }
   }
 
-  if (s.sp === null && matt?.phase === 'done' && s.merged !== true) {
+  if (s.sp === null && matt?.phase === 'done' && s.merged === false) {
     return commandAction('writes the pull request body', 'mattpocock-skills:pr', installed)
   }
 

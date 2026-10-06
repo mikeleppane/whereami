@@ -73,6 +73,21 @@ async function defaultOf(io: Io): Promise<Pick<RepoFacts, 'defaultName' | 'defau
 // Exactly two absolute paths, one per line: a path holding a line break cannot be told apart, so it is no repo.
 const TWO_PATHS = /^((?:\/|[A-Za-z]:\/)[^\r\n]*)\r?\n((?:\/|[A-Za-z]:\/)[^\r\n]*)\r?\n$/
 
+// HEAD's commit: null when git says there is none yet (exit 1 before the first commit), undefined when it
+// cannot tell.
+export async function headOf(io: Io): Promise<string | null | undefined> {
+  const r = answered(await io.git(['rev-parse', '--verify', '--quiet', 'HEAD']), [0, 1])
+  if (r === null) return undefined
+  return r.code === 1 ? null : r.out.split(/\r?\n/)[0] || undefined
+}
+
+// The current branch: null when git says HEAD is detached (exit 1), undefined when it cannot tell.
+export async function branchOf(io: Io): Promise<string | null | undefined> {
+  const r = answered(await io.git(['symbolic-ref', '--quiet', '--short', 'HEAD']), [0, 1])
+  if (r === null) return undefined
+  return r.code === 1 ? null : r.out.split(/\r?\n/)[0] || undefined
+}
+
 // The same git calls as hooks/session-start.sh, so the mod and the hook pick the same branch key.
 export async function repoFacts(io: Io): Promise<RepoFacts | null> {
   const r = await io.git([
@@ -88,7 +103,7 @@ export async function repoFacts(io: Io): Promise<RepoFacts | null> {
   const branch = await first(io, ['symbolic-ref', '--quiet', '--short', 'HEAD'])
   const current = answered(await io.git(['symbolic-ref', '--quiet', 'HEAD']), [0, 1])
   const branchRef = current?.code === 1 ? null : current?.out.replace(/\r?\n$/, '') || undefined
-  const head = await first(io, ['rev-parse', '--verify', '--quiet', 'HEAD'])
+  const head = await headOf(io)
   const originHead = await first(io, [
     'symbolic-ref',
     '--quiet',

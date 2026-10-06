@@ -125,6 +125,26 @@ test('a finished Superpowers feature without a ledger is not offered another bui
   expect(action?.text).toContain('finish and merge this branch')
 })
 
+// Spec section 5: a squash merge is `unknown` and default-branch work has no merged state; neither is "not
+// merged" (rows 4 and 14), so neither finishes a branch nor writes a pull request body.
+test('finishing and the pull request body are drafted only for a branch known not merged', () => {
+  const both = installed('superpowers:finishing-a-development-branch', 'mattpocock-skills:pr')
+  const matt = mattResult('done', {
+    items: [item('01', 'complete', { path: '.scratch/demo/issues/01-t.md', raw: 'done' })],
+    total: 1,
+  })
+  const drafted = (merged: FeatureState['merged']) => [
+    nextAction(feature({ sp: superpowers('done', { allComplete: true }), merged }), both)?.command,
+    nextAction(feature({ matt, merged }), both)?.command,
+  ]
+  expect(drafted(false)).toEqual([
+    '/superpowers:finishing-a-development-branch',
+    '/mattpocock-skills:pr',
+  ])
+  for (const merged of ['unknown', 'n/a'] as const)
+    expect(drafted(merged)).toEqual([undefined, undefined])
+})
+
 test('a Superpowers review resumes its configured build skill at the final review', () => {
   const action = nextAction(
     feature({
@@ -415,6 +435,7 @@ test('a mixed feature takes phase and count from its Superpowers plan', () => {
           item('Task 2', 'open', { kind: 'task' }),
         ],
         total: 2,
+        ledgerSeen: true,
       }),
       matt: mattResult('done', { total: 3, decisions: [1, 3] }),
     }),
@@ -427,6 +448,44 @@ test('a mixed feature takes phase and count from its Superpowers plan', () => {
     decisions: [1, 3],
     blocked: 0,
   })
+})
+
+// Spec section 5: a mixed feature takes its phase from the plan, so Matt rows never draft work for it.
+test('a mixed feature whose plan rows do not fit drafts no Matt work', () => {
+  const all = installed(
+    'mattpocock-skills:implement',
+    'mattpocock-skills:to-tickets',
+    'mattpocock-skills:ask-matt',
+  )
+  const ready = mattResult('plan', {
+    docs: { spec: MATT_SPEC, tickets: '.scratch/demo/issues/' },
+    items: [item('01', 'open', { path: '.scratch/demo/issues/01-t.md', raw: 'ready-for-agent' })],
+    total: 1,
+    frontier: ['01'],
+  })
+  const untracked = mattResult('design', { docs: { spec: MATT_SPEC }, total: 0 })
+  const plan = { docs: { plan: PLAN, spec: MATT_SPEC } }
+  const cases: [Partial<FeatureState>, MattResult, string][] = [
+    // A ledger-backed build with its agents running.
+    [
+      { sp: superpowers('build', { ...plan, ledgerSeen: true }), agentsRunning: 1 },
+      ready,
+      'implement',
+    ],
+    // A plan done and merged.
+    [
+      { sp: superpowers('done', { ...plan, allComplete: true }), merged: true },
+      untracked,
+      'to-tickets',
+    ],
+    // A plan whose ledger was removed before the build was seen to finish.
+    [{ sp: superpowers('unknown', { ...plan, ledgerSeen: true }) }, ready, 'implement'],
+  ]
+  for (const [fields, matt, alone] of cases) {
+    // Control: the same Matt evidence on its own drafts Matt work.
+    expect(nextAction(feature({ ...fields, sp: null, matt }), all)?.command).toContain(alone)
+    expect(nextAction(feature({ ...fields, matt }), all)).toBe(null)
+  }
 })
 
 test('phaseOf counts needs-info tickets as blocked', () => {
@@ -448,6 +507,7 @@ test('phaseOf does not count a parked finding as blocked', () => {
       sp: superpowers('done', {
         items: [item('Task 1', 'complete', { kind: 'task', parked: 1 })],
         total: 1,
+        ledgerSeen: true,
       }),
     }),
   )

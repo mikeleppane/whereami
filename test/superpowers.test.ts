@@ -380,21 +380,25 @@ test('a ledger task absent from the plan is reported without creating an item', 
   expect(result.items).toHaveLength(3)
 })
 
+// Spec section 5: a ledger never seen is "no progress recorded", so a plan heading gives no task a state.
 test('without a ledger the plan and its commits set the phase', () => {
-  const cases: [Partial<SpInput>, SpResult['phase'], boolean, string[]][] = [
-    [{ plan: { tasks: [] } }, 'unknown', false, ['plan has no tasks']],
-    [{ plan: null }, 'design', false, []],
-    [{}, 'plan', false, []],
+  const unknown = ['unknown', 'unknown', 'unknown']
+  const cases: [Partial<SpInput>, SpResult['phase'], boolean, string[], string[]][] = [
+    [{ plan: { tasks: [] } }, 'unknown', false, ['plan has no tasks'], []],
+    [{ plan: null }, 'design', false, [], []],
+    [{}, 'plan', false, [], unknown],
     [
       { taskCommits: null },
       'plan',
       true,
       ['commits unknown: git could not list this branch, so none can be ruled out'],
+      unknown,
     ],
   ]
 
-  for (const [overrides, phase, weak, notes] of cases) {
+  for (const [overrides, phase, weak, notes, states] of cases) {
     const result = readSuperpowers(makeInput(null, overrides))
     expect([result.phase, result.weak, result.notes]).toEqual([phase, weak, notes])
+    expect(result.items.map((i) => i.state)).toEqual(states)
   }
 })

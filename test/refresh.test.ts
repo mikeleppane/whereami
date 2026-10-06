@@ -25,9 +25,10 @@ const SPEC = 'docs/superpowers/specs/2026-10-05-auth-design.md'
 
 // git(r), except the calls `differ` answers; undefined leaves a call to git(r).
 const gitBut =
-  (r: Repo, differ: (a: string) => GitResult | string | null | undefined) => (args: string[]) => {
+  (r: Repo, differ: (a: string) => GitResult | string | null | undefined) =>
+  (args: string[], stdin?: string) => {
     const answer = differ(args.join(' '))
-    return answer === undefined ? git(r)(args) : answer
+    return answer === undefined ? git(r)(args, stdin) : answer
   }
 
 const session = (fields: Partial<SessionFacts> = {}): SessionFacts => ({
@@ -168,7 +169,8 @@ test('lifecycle: review, done from the snapshot, merged, then unknown after a sq
   Object.assign(r, { merged: false, deleted: true, branch: null })
   const squashed = feature((await refresh(io, session())).view)
   expect(squashed.headline.phase).toBe('done')
-  expect(squashed.next?.command).toContain('finishing-a-development-branch')
+  // Unknown is never "not merged": finishing the branch again is not suggested.
+  expect(squashed.next).toBe(null)
   expect(squashed.merged).toBe('unknown')
   for (const file of ['detail', 'context'])
     expect(io.written[`${W}/branches/detached-%2Fr/${file}`]).toContain('merged: unknown')
@@ -416,7 +418,7 @@ test('equal write times use the latest explicit occurrence to select the replace
     (await refresh(io, session({ writtenDocs: [PLAN, OLD, PLAN], since: 5, installed }))).view,
   )
   expect(v.docs).toEqual({ plan: PLAN, spec: SPEC })
-  expect(v.headline.count).toEqual([0, 1])
+  expect(v.headline.planned).toBe(1)
   expect(v.next?.command).toBe(`/superpowers:subagent-driven-development ${PLAN}`)
   expect((await readNotes(io, W)).notes[0]?.docs.plan).toBe(PLAN)
 })
@@ -463,7 +465,7 @@ test('the newest explicit plan start selects the replacement across refreshes', 
       const v = feature((await refresh(io, facts)).view)
       expect(v.docs).toEqual({ plan: PLAN, spec: SPEC })
       expect(v.headline.phase).toBe('plan')
-      expect(v.headline.count).toEqual([0, 1])
+      expect(v.headline.planned).toBe(1)
       expect(v.next?.command).toBe(`/superpowers:subagent-driven-development ${PLAN}`)
       expect((await readNotes(io, W)).notes[0]?.observed).toContainEqual(replacement)
       expect(io.written[`${W}/branches/feat%2Fauth/watch`]).toBe(`/r/${SPEC}\n/r/${PLAN}\n`)
@@ -497,7 +499,9 @@ test('a ledger-selected replacement survives removal without resurrecting a hist
     at: '2026-10-06T09:00:00.000Z',
   }
   let now = Date.parse('2026-10-06T10:00:00.000Z')
-  const io = { ...fakeIo(files, git(repo())), now: async () => now }
+  // A commit of the branch's own, so its tip makes it known not merged.
+  const r = repo({ log: `\0${TIP}\tcode\0\nsrc/x.ts\0` })
+  const io = { ...fakeIo(files, git(r)), now: async () => now }
   const installed = new Set([
     'superpowers:subagent-driven-development',
     'superpowers:finishing-a-development-branch',
@@ -610,10 +614,14 @@ test('a branch or default branch git could not tell is weak, links nothing and i
     expect(v.headline.weak).toBe(true)
     expect(v.branch).toBe(label)
     expect((await readNotes(io, W)).notes[0]?.branches).toEqual(['feat/x'])
-    const message = Object.entries(io.written).find(([p]) => p.endsWith('/message'))?.[1]
-    expect(message).toContain('design ?')
-    expect(message).not.toContain('detached HEAD')
-    if (label === undefined) expect(message).toContain('branch unknown')
+    const summaries = Object.keys(io.written).filter((p) => p.startsWith(`${W}/branches/`))
+    // No summary key can be told: one under the detached key would never print for this branch.
+    if (label === undefined) expect(summaries).toEqual([])
+    else {
+      const message = io.written[`${W}/branches/${branch.replace('/', '%2F')}/message`]
+      expect(message).toContain('design ?')
+      expect(message).not.toContain('detached HEAD')
+    }
   }
   // Control: a HEAD git confirms detached is named so.
   const io = fakeIo(
@@ -688,6 +696,57 @@ test('an observed implement whose commits git cannot count is unknown, never 0 c
   expect(v.matt?.items[0]?.state).toBe('unknown')
   expect(v.matt?.items[0]?.evidence[0]?.text).toContain('commits since unknown')
   expect(v.headline.weak).toBe(true)
+})
+
+// A start whose HEAD git could not read saves no head: its work is unknown, never every commit on HEAD.
+test('a saved implement start with no known head is unknown work, never built here', async () => {
+  const ticket = '.scratch/demo/issues/01-store.md'
+  const files = {
+    [`/r/${ticket}`]: '# Store\n\nStatus: ready-for-agent\n',
+    [`${W}/features/demo/note.json`]: serializeNote(
+      note({
+        id: 'demo',
+        branches: ['main'],
+        docs: { tickets: '.scratch/demo/issues/' },
+        observed: [
+          {
+            skill: 'mattpocock-skills:implement',
+            doc: ticket,
+            branch: 'main',
+            at: '2026-10-06T10:00:00.000Z',
+          },
+        ],
+      }),
+    ),
+  }
+  const io = fakeIo(files, git(repo({ branch: 'main', since: `${HEAD}\n${TIP}\n` })))
+  const v = feature((await refresh(io, session())).view)
+  expect(v.notices).toEqual([])
+  expect(v.matt?.items[0]?.state).toBe('unknown')
+  expect(v.matt?.items[0]?.evidence[0]?.text).toContain('commits since unknown')
+})
+
+test('a ticket reading otherwise on another branch differs there; branches git cannot list are unknown', async () => {
+  const ticket = '.scratch/demo/issues/01-store.md'
+  const files = { ['/r/' + ticket]: '# Store\n\nStatus: ready-for-agent\n' }
+  let listed = true
+  const copies = { [`refs/heads/main:${ticket}`]: '# Store\n\nStatus: done\n' }
+  const io = fakeIo(
+    files,
+    gitBut(repo({ copies }), (a) =>
+      a === 'for-each-ref --format=%(refname) refs/heads/' && !listed ? null : undefined,
+    ),
+  )
+  const facts = session({ writtenDocs: [ticket] })
+  const whole = feature((await refresh(io, facts)).view)
+  expect(whole.notices).toEqual([])
+  expect(whole.matt?.items.map((i) => [i.key, i.state, i.differsOn])).toEqual([
+    ['01', 'open', ['main']],
+  ])
+  listed = false
+  const v = feature((await refresh(io, facts)).view)
+  expect(v.matt?.items.map((i) => i.state)).toEqual(['open'])
+  expect(v.notices).toEqual([expect.stringContaining('could not read the other branches')])
 })
 
 test('a Matt spec whose tickets git cannot list suggests no to-tickets and is weak', async () => {

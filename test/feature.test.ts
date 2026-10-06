@@ -222,6 +222,24 @@ test('the default branch shows the newest note with no branch of its own, weakly
     id: 'old',
     weak: true,
   })
+  // A recorded link on the default branch still shows weakly (spec section 4).
+  expect(
+    resolveFeature(
+      input({
+        branch: 'main',
+        isDefault: true,
+        notes: [old],
+        ledgerPlans: [plan('docs/superpowers/plans/old.md')],
+      }),
+    ),
+  ).toEqual({ kind: 'one', id: 'old', weak: true })
+  // So does the user's own pick; the same pick on a branch of its own is strong.
+  expect(
+    resolveFeature(input({ branch: 'main', isDefault: true, notes: [old], chosen: 'old' })),
+  ).toEqual({ kind: 'one', id: 'old', weak: true })
+  expect(
+    resolveFeature(input({ notes: [note('old', { branches: ['feat/x'] })], chosen: 'old' })),
+  ).toEqual({ kind: 'one', id: 'old', weak: false })
   const tied = resolveFeature(
     input({
       branch: 'main',

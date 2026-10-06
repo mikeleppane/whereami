@@ -66,6 +66,8 @@ const BUILD_SKILLS = ['superpowers:subagent-driven-development', 'superpowers:ex
 const PLAN_EDITED = 'plan edited since the build started'
 const UNKNOWN_BRANCH =
   'git could not tell the branch or the default branch: this branch was not linked'
+const OTHERS_UNKNOWN =
+  'git could not read the other branches: a ticket differing there is not shown'
 
 function docsOf(doc: DocRef): Docs {
   switch (doc.kind) {
@@ -152,6 +154,8 @@ async function writeSummary(
   featureId: string,
   watch: string[],
 ) {
+  // No key when git could not tell the branch: the detached key is only for a HEAD git confirmed detached.
+  if (facts.branch === null && facts.branchRef !== null) return
   await writeAll(
     io,
     paths(facts.commonDir).branch(facts.branch, facts.root),
@@ -354,10 +358,12 @@ export async function refresh(io: Io, s: SessionFacts): Promise<RefreshResult> {
 
   let matt: MattResult | null = null
   let ticketsUnknown = false
+  let othersUnknown = false
   let ticketsDir: string | undefined
   if (folder !== undefined) {
     const build = await buildBranch(io, base, facts)
-    const found = build === null ? null : await readTickets(io, folder, facts, build, base.branches)
+    const found = build === null ? null : await readTickets(io, folder, facts, build)
+    othersUnknown = found?.othersUnknown === true
     const tickets = found?.tickets ?? null
     const counted: (Observed & { commitsSince: number | null })[] = []
     for (const o of observed) counted.push({ ...o, commitsSince: await commitsSince(io, o.head) })
@@ -379,7 +385,7 @@ export async function refresh(io: Io, s: SessionFacts): Promise<RefreshResult> {
 
   const hasOwnCommits = commits !== null && commits.length > 0
   const tips =
-    linkable !== null && hasOwnCommits && facts.head !== null
+    linkable !== null && hasOwnCommits && typeof facts.head === 'string'
       ? { ...base.tips, [linkable]: facts.head }
       : base.tips
   const buildSkill = newest(observed, (o) => BUILD_SKILLS.includes(o.skill))?.skill
@@ -406,7 +412,7 @@ export async function refresh(io: Io, s: SessionFacts): Promise<RefreshResult> {
       prevInvalid: invalid.includes(keyOf(id)),
       id,
       branch: linkable,
-      head: facts.head,
+      head: facts.head ?? null,
       isDefault,
       hasOwnCommits,
       docs,
@@ -424,6 +430,7 @@ export async function refresh(io: Io, s: SessionFacts): Promise<RefreshResult> {
   const notices = [
     ...kept.notices,
     ...(known ? [] : [UNKNOWN_BRANCH]),
+    ...(othersUnknown ? [OTHERS_UNKNOWN] : []),
     ...(switchedFrom === undefined ? [] : [`switched to ${id}; ${switchedFrom} is done`]),
   ]
   const weak =

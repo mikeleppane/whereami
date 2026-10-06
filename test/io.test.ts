@@ -1,9 +1,10 @@
 import { expect, mock, type TestBody, test } from 'claude-code/testing'
 import { branchCommits, buildBranch, mergedState, readTickets } from '../src/gather'
-import { parseCatFileBatch, repoFacts } from '../src/io'
+import { branchOf, parseCatFileBatch, repoFacts } from '../src/io'
 import { refresh } from '../src/refresh'
 import type { GitResult, Note } from '../src/types'
 import { fakeIo } from './fake-io'
+import { catFile } from './fixtures/repo'
 import { posix } from './world'
 
 type World = {
@@ -20,6 +21,8 @@ type World = {
   // show-ref answers for refs whose probe does not answer plainly.
   probes?: Record<string, GitResult>
   worktrees?: GitResult | string
+  // The HEAD probe's answer, when it is not the commit or git's exit 1 before the first commit.
+  headProbe?: GitResult
 }
 
 const ABSENT: GitResult = { code: 1, out: '', truncated: false }
@@ -41,7 +44,8 @@ const repo = (w: World, files: Record<string, string> = {}) =>
         w.branch === undefined ? ABSENT : `${w.branchShort ?? w.branch}\n`,
       'symbolic-ref --quiet HEAD':
         w.currentRef ?? (w.branch === undefined ? ABSENT : `refs/heads/${w.branch}\n`),
-      'rev-parse --verify --quiet HEAD': w.head === undefined ? null : `${w.head}\n`,
+      'rev-parse --verify --quiet HEAD':
+        w.headProbe ?? (w.head === undefined ? ABSENT : `${w.head}\n`),
       'symbolic-ref --quiet --short refs/remotes/origin/HEAD':
         w.originHead === undefined ? ABSENT : `${w.originShort ?? `origin/${w.originHead}`}\n`,
       'symbolic-ref --quiet refs/remotes/origin/HEAD':
@@ -111,6 +115,32 @@ test('repoFacts before the first commit has no head', async () => {
   expect(facts?.head).toBe(null)
 })
 
+// A failed or cut HEAD probe is unknown, never "no commits": later work would count every commit since the start.
+test('repoFacts leaves the head unknown when git cannot read HEAD', async () => {
+  const failed = { code: 128, out: '', truncated: false }
+  const cut = { code: 0, out: SHA.slice(0, 7), truncated: true }
+  for (const headProbe of [failed, cut]) {
+    // The repo and its branch are still known.
+    const facts = await repoFacts(repo({ branch: 'main', headProbe }))
+    expect(facts).toEqual(
+      expect.objectContaining({ root: '/r', commonDir: '/r/.git', branch: 'main' }),
+    )
+    expect(facts?.head).toBe(undefined)
+  }
+})
+
+// A skill start records its branch: detached (exit 1) is null, a lookup git fails or cuts is unknown.
+test('branchOf tells a detached HEAD from a branch git cannot read', async () => {
+  const of = (r: GitResult) =>
+    branchOf(
+      fakeIo({}, (args) => (args.join(' ') === 'symbolic-ref --quiet --short HEAD' ? r : null)),
+    )
+  expect(await of({ code: 0, out: 'feat/a\n', truncated: false })).toBe('feat/a')
+  expect(await of({ code: 1, out: '', truncated: false })).toBe(null)
+  expect(await of({ code: 128, out: '', truncated: false })).toBe(undefined)
+  expect(await of({ code: 0, out: 'feat/', truncated: true })).toBe(undefined)
+})
+
 test('repoFacts falls back to master without origin/HEAD or main', async () => {
   const facts = await repoFacts(repo({ branch: 'x', head: SHA, heads: ['master', 'x'] }))
   expect(facts?.defaultBranch).toBe('master')
@@ -161,6 +191,7 @@ test('ref collisions keep display keys but never change the build inventory or d
     build: string | null
     base: string | null
     status: string | null
+    differsOn?: string[]
     defaultUnknown?: boolean
   })[] = [
     {
@@ -171,6 +202,7 @@ test('ref collisions keep display keys but never change the build inventory or d
       build: 'refs/heads/feat/int',
       base: 'refs/heads/main',
       status: 'done',
+      differsOn: ['main', 'feat/a'],
     },
     {
       branchShort: 'heads/feat/a',
@@ -186,6 +218,7 @@ test('ref collisions keep display keys but never change the build inventory or d
       build: 'refs/heads/feat/a',
       base: 'refs/heads/main',
       status: 'claimed',
+      differsOn: ['main', 'feat/int'],
     },
     ...[failed, cut, { ...ABSENT, truncated: true }].map((currentRef) => ({
       currentRef,
@@ -200,6 +233,7 @@ test('ref collisions keep display keys but never change the build inventory or d
       build: 'refs/heads/main',
       base: 'refs/heads/main',
       status: 'ready-for-agent',
+      differsOn: ['feat/a', 'feat/int'],
     },
     {
       currentRef: failed,
@@ -207,6 +241,7 @@ test('ref collisions keep display keys but never change the build inventory or d
       build: 'refs/heads/feat/int',
       base: 'refs/heads/main',
       status: 'done',
+      differsOn: ['main', 'feat/a'],
     },
     ...[failed, { ...ABSENT, truncated: true }].map((probe) => ({
       probes: { 'refs/heads/main': probe },
@@ -214,6 +249,7 @@ test('ref collisions keep display keys but never change the build inventory or d
       build: 'refs/heads/feat/int',
       base: null,
       status: 'done',
+      differsOn: ['main', 'feat/a'],
     })),
     ...[failed, { code: 0, out: 'refs/remotes/origin/main\n', truncated: true }].map(
       (originRef) => ({
@@ -231,6 +267,7 @@ test('ref collisions keep display keys but never change the build inventory or d
       build: 'refs/heads/feat/a',
       base: null,
       status: 'claimed',
+      differsOn: ['main', 'feat/int'],
       defaultUnknown: true,
     },
     {
@@ -261,23 +298,41 @@ test('ref collisions keep display keys but never change the build inventory or d
     },
   ]
   for (const row of rows) {
-    const world = { branch: 'feat/a', head: SHA, originHead: 'main', ...row }
+    const world = {
+      branch: 'feat/a',
+      head: SHA,
+      originHead: 'main',
+      heads: ['main', 'feat/a', 'feat/int'],
+      ...row,
+    }
     const baseIo = repo(world)
     const io = {
       ...baseIo,
       git: async (args: string[], stdin?: string): Promise<GitResult> => {
-        if (args[0] === 'for-each-ref')
+        if (args[0] === 'for-each-ref') {
+          const refs = world.heads.map((h) => `refs/heads/${h}`)
           return {
             code: 0,
-            out: '300\trefs/heads/main\n200\trefs/heads/feat/int\n',
+            out:
+              args[1] === '--format=%(refname)'
+                ? refs.map((ref) => `${ref}\n`).join('')
+                : refs
+                    .filter((ref) => args.slice(2).includes(ref))
+                    .map(
+                      (ref) =>
+                        `${ref === 'refs/heads/main' ? 300 : ref === 'refs/heads/feat/int' ? 200 : 100}\t${ref}\n`,
+                    )
+                    .join(''),
             truncated: false,
           }
+        }
         if (args[0] === 'ls-tree') return { code: 0, out: `${path}\0`, truncated: false }
         if (args[0] === 'cat-file') {
           // The newer default branch has stale tickets; neither it nor an ambiguous tag may override build.
-          const text = tickets[stdin?.slice(0, stdin.indexOf(':')) ?? '']
-          if (text === undefined) throw new Error(`unexpected ticket revision: ${stdin}`)
-          return { code: 0, out: `${SHA} blob ${text.length}\n${text}\n`, truncated: false }
+          const blobs = Object.fromEntries(
+            Object.entries(tickets).map(([ref, text]) => [`${ref}:${path}`, text]),
+          )
+          return { code: 0, out: catFile(blobs)(stdin), truncated: false }
         }
         if (args[0] === 'log') return { code: 0, out: `\0${SHA}\tbuild\0`, truncated: false }
         if (args[0] === 'merge-base') return { code: 0, out: '', truncated: false }
@@ -292,11 +347,15 @@ test('ref collisions keep display keys but never change the build inventory or d
       row.base,
     ])
     const build = await buildBranch(io, { ...saved, branches: row.branches }, facts)
-    const read = build === null ? null : await readTickets(io, '.scratch/f', facts, build, [])
-    expect([build, read?.tickets.map((t) => [t.path, t.status]) ?? null]).toEqual([
+    const read = build === null ? null : await readTickets(io, '.scratch/f', facts, build)
+    expect([build, read?.tickets.map((t) => [t.path, t.status, t.differsOn]) ?? null]).toEqual([
       row.build,
-      row.status === null ? null : [[path, row.status]],
+      row.status === null ? null : [[path, row.status, row.differsOn]],
     ])
+    if (read !== null) {
+      expect(read.othersUnknown).toBe(false)
+      expect(read.unreadable).toEqual([])
+    }
     expect(await mergedState(io, saved, facts)).toBe(
       row.defaultUnknown || world.originHead === undefined ? 'unknown' : 'n/a',
     )
@@ -338,13 +397,14 @@ test('main-worktree discovery preserves unusual paths and unknown ticket invento
     }
     const facts = await repoFacts(io)
     if (facts === null) throw new Error('expected linked-worktree facts')
-    return readTickets(io, '.scratch/f', facts, 'refs/heads/feat/a', [])
+    return readTickets(io, '.scratch/f', facts, 'refs/heads/feat/a')
   }
   expect((await read(listing))?.tickets.map((t) => [t.path, t.status])).toEqual([
     [path, 'needs-triage'],
   ])
-  expect(await read('')).toEqual({ tickets: [], unreadable: [] })
-  expect(await read('worktree /r/.git\0bare\0\0')).toEqual({ tickets: [], unreadable: [] })
+  const none = { tickets: [], unreadable: [], othersUnknown: false }
+  expect(await read('')).toEqual(none)
+  expect(await read('worktree /r/.git\0bare\0\0')).toEqual(none)
   expect(await read({ code: 128, out: '', truncated: false })).toBe(null)
   expect(await read({ code: 0, out: listing, truncated: true })).toBe(null)
 })

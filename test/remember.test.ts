@@ -185,6 +185,8 @@ test('a current ledger overwrites the prior snapshot', () => {
         '# SDD ledger — plan: docs/superpowers/plans/auth.md',
         'progress file removed before the build was seen to finish',
         'Task 1: fix round 1/3 (from the progress file before it was removed)',
+        'Task 2: fix round 1/5 (spec reviewer: missing test)',
+        'Task 2: complete (commits c..d, 1 parked)',
       ].join('\n'),
     },
     ledgerPath: LEDGER,
@@ -201,6 +203,12 @@ test('a current ledger overwrites the prior snapshot', () => {
     state: 'in-progress',
     fixRound: [1, 3],
     evidence: 'from the progress file before it was removed',
+  })
+  // The evidence kept is the winning status line's, not the earlier fix round's.
+  expect(remembered.note.last?.tasks['2']).toEqual({
+    state: 'complete',
+    parked: 1,
+    evidence: 'commits c..d, 1 parked',
   })
 })
 
@@ -222,7 +230,7 @@ test('a ledger snapshot keeps three task statuses after the ledger is gone', () 
   expect(first.note.last).toEqual({
     phase: 'build',
     tasks: {
-      '1': { state: 'complete', reviewed: true, evidence: 'task one evidence' },
+      '1': { state: 'complete', reviewed: true, evidence: 'later evidence' },
       '2': { state: 'in-progress', fixRound: [2, 5], evidence: 'task two evidence' },
       '3': { state: 'complete', parked: 1, evidence: 'task three evidence' },
     },
@@ -431,6 +439,37 @@ test('done records the finish time once until a replacement plan starts', () => 
   )
   expect(replacement.note.docs.plan).toBe('docs/superpowers/plans/replacement.md')
   expect(replacement.finishedAt).toBe(null)
+})
+
+// Spec section 3: `finished` holds when the feature reached done or merged, "empty otherwise". Unknown is no
+// evidence either way: it neither starts nor clears the expiry clock.
+test('a finished feature reopened on the same plan clears its finish time; unknown keeps it', () => {
+  // Done at NOW (2026-10-06T12:34:56Z), unknown a day later, reopened a day after that.
+  const done = remember(input({ headline: headline('done') }), null)
+  const unknown = remember(
+    input({
+      prev: done.note,
+      headline: headline('unknown'),
+      now: new Date('2026-10-07T12:34:56.000Z'),
+    }),
+    done.finishedAt,
+  )
+  const reopened = remember(
+    input({
+      prev: unknown.note,
+      headline: headline('build'),
+      now: new Date('2026-10-08T12:34:56.000Z'),
+    }),
+    unknown.finishedAt,
+  )
+
+  expect(done.finishedAt).toBe(1791290096)
+  expect(done.note.docs.plan).toBe('docs/superpowers/plans/auth.md')
+  expect(unknown.finishedAt).toBe(1791290096)
+  expect(reopened.note.docs.plan).toBe('docs/superpowers/plans/auth.md')
+  expect(reopened.finishedAt).toBe(null)
+  const fresh = input({ headline: headline('unknown'), now: new Date('2026-10-07T12:34:56.000Z') })
+  expect(remember(fresh, null).finishedAt).toBe(null)
 })
 
 test('an invalid previous note adds the unreadable-record notice', () => {

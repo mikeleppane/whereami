@@ -13,10 +13,12 @@ import {
   writtenSince,
 } from '../src/gather'
 import { parseTicket, readMatt } from '../src/matt'
+import { nextAction } from '../src/next'
 import { serializeNote } from '../src/notes'
 import type { GitResult, Note, RepoFacts } from '../src/types'
 import { fakeIo } from './fake-io'
 import { BOLD_READY_TICKET } from './fixtures/matt'
+import { catFile } from './fixtures/repo'
 
 const A = 'a'.repeat(40)
 const B = 'b'.repeat(40)
@@ -44,20 +46,6 @@ const note = (fields: Partial<Note>): Note => ({
   ...fields,
 })
 const commit = (subject: string) => ({ sha: A, subject, files: [] })
-
-// git cat-file --batch answering `blobs` (spec to text; absent specs are missing), sizes in bytes.
-const batch =
-  (blobs: Record<string, string>) =>
-  (stdin = '') =>
-    stdin
-      .split('\n')
-      .filter((spec) => spec !== '')
-      .map((spec) => {
-        const text = blobs[spec]
-        if (text === undefined) return `${spec} missing\n`
-        return `${A} blob ${new TextEncoder().encode(text).length}\n${text}\n`
-      })
-      .join('')
 
 test('branchCommits reads each commit of the branch with its subject and files', async () => {
   const log = 'log --name-only -z --format=%x00%H%x09%s --end-of-options refs/heads/main..HEAD'
@@ -111,14 +99,61 @@ test('taskNumbers lists each task a subject names, once, in order', () => {
   expect(taskNumbers(subjects.map(commit))).toEqual([1, 3])
 })
 
-test('relatedKeys matches a ticket number or slug only as a whole word', () => {
+test('relatedKeys recognizes explicit numbers without numeric-literal components and prevents redo', () => {
   const tickets = ['01-token-store.md', '02-refresh.md'].map((name) =>
-    parseTicket(`.scratch/f/issues/${name}`, ''),
+    parseTicket(`.scratch/f/issues/${name}`, 'Status: ready-for-agent'),
   )
+  const cases: [string, string[]][] = [
+    ['implement #02 now', ['02']],
+    ['ticket 01', ['01']],
+    ['01: add storage', ['01']],
+    ['fix: 01', ['01']],
+    ['ticket 02: refresh (#01)', ['01', '02']],
+    ['fix: #01,#02', ['01', '02']],
+    ['fix(#01)', ['01']],
+    ['fix: tickets #01-02', ['01', '02']],
+    ['fix: tickets #01-03', ['01']],
+    ['finish token-store', ['01']],
+    ['bump 2026', []],
+    ['release 2026-10-01', []],
+    ['release 2026/01/02', []],
+    ['bump v1.02', []],
+    ['bump 1.01', []],
+    ['at 01:02:03', []],
+    ['fix: #010, 102, a01, 02b, _01', []],
+    ['release 2026-10-01, v1.02; ticket 01', ['01']],
+  ]
   const keys = (subject: string) => relatedKeys([commit(subject)], tickets)
-  expect(keys('implement #02 now')).toEqual(['02'])
-  expect(keys('finish token-store')).toEqual(['01'])
-  expect(keys('bump 2026')).toEqual([])
+  const matt = readMatt({
+    folder: '.scratch/f',
+    hasSpec: true,
+    hasMap: false,
+    tickets,
+    unreadable: [],
+    observed: [],
+    relatedKeys: keys('fix: tickets #01-02'),
+  })
+  const next = nextAction(
+    {
+      id: 'f',
+      sp: null,
+      matt,
+      merged: false,
+      agentsRunning: 0,
+      agentsBeforeClear: 0,
+      taskCommitsWithoutLedger: [],
+    },
+    new Set(['mattpocock-skills:implement', 'mattpocock-skills:ask-matt']),
+  )
+  expect({
+    mentions: cases.map(([subject]) => [subject, keys(subject)]),
+    frontier: matt.frontier,
+    next: next?.command,
+  }).toEqual({
+    mentions: cases,
+    frontier: [],
+    next: '/mattpocock-skills:ask-matt',
+  })
 })
 
 test('a ticket slug in any script relates its commit and leaves the frontier', () => {
@@ -150,7 +185,9 @@ test('commitsSince counts commits after an observed head, or all without one', a
   })
   expect(await commitsSince(io, 'abc')).toBe(2)
   expect(await commitsSince(io, null)).toBe(3)
-  // Missing evidence is unknown, not 0 commits: git failed, its output was cut, or the head is no commit id.
+  // Missing evidence is unknown, not 0 commits: git failed, its output was cut, the head is no commit id, or
+  // git could not read HEAD at the start (never all of HEAD's history).
+  expect(await commitsSince(io, undefined)).toBe(null)
   const cut = fakeIo({}, () => ({ code: 0, out: `${A}\n`, truncated: true }))
   expect(await commitsSince(cut, 'abc')).toBe(null)
   expect(await commitsSince(io, 'def')).toBe(null)
@@ -273,23 +310,30 @@ const PATH = '.scratch/f/issues/01-store.md'
 const BUILD = `refs/heads/feat/a:${PATH}`
 const OTHER = `refs/heads/feat/b:${PATH}`
 
-// git with 01-store.md committed on feat/a: its ls-tree answer, then cat-file's.
+const LIST = 'for-each-ref --format=%(refname) refs/heads/'
+// git with 01-store.md committed on feat/a: its ls-tree answer, then cat-file's; `refs` lists the local branches.
 const committedGit =
-  (tree: GitResult | string | null, cat: (stdin: string) => GitResult | string) =>
-  (args: string[], stdin = '') =>
-    args.join(' ') === LS_TREE ? tree : args.join(' ') === 'cat-file --batch' ? cat(stdin) : null
+  (
+    tree: GitResult | string | null,
+    cat: (stdin: string) => GitResult | string,
+    refs: GitResult | string | null = 'refs/heads/feat/a\nrefs/heads/feat/b\n',
+  ) =>
+  (args: string[], stdin = '') => {
+    const a = args.join(' ')
+    return a === LS_TREE ? tree : a === 'cat-file --batch' ? cat(stdin) : a === LIST ? refs : null
+  }
 
 test('readTickets is null when git cannot tell which tickets are committed or what they hold', async () => {
   const files = { [`/r/${PATH}`]: 'Status: claimed' }
   const read = (git: ReturnType<typeof committedGit>) =>
-    readTickets(fakeIo(files, git), '.scratch/f', FACTS, 'refs/heads/feat/a', ['feat/b'])
-  const blobs = batch({ [BUILD]: BOLD_READY_TICKET, [OTHER]: 'Status: done' })
+    readTickets(fakeIo(files, git), '.scratch/f', FACTS, 'refs/heads/feat/a')
+  const blobs = catFile({ [BUILD]: BOLD_READY_TICKET, [OTHER]: 'Status: done' })
   const whole = await read(committedGit(`${PATH}\0`, blobs))
   expect(whole?.tickets.map((t) => [t.path, t.status, t.differsOn])).toEqual([
     [PATH, 'ready-for-agent', ['feat/b']],
   ])
   expect(whole?.unreadable).toEqual([])
-  // The build branch's record is whole; feat/b's, after it, is cut at the 4 MiB cap.
+  // One cat-file call asks for every copy; its last record, feat/b's, is cut at the 4 MiB cap.
   const delivered: string[] = []
   const cut = (stdin: string) => {
     delivered.push(stdin)
@@ -314,7 +358,6 @@ test('readTickets before the first commit reads the working tree once git says t
       '.scratch/f',
       FACTS,
       'refs/heads/feat/a',
-      [],
     )
   const fresh = await read({ code: 1, out: '', truncated: false })
   expect(fresh?.tickets.map((t) => [t.path, t.status])).toEqual([
@@ -328,9 +371,9 @@ test('a committed ticket whose name holds a line break is unreadable, never drop
   // The odd name comes first: sent to cat-file, its two lines would shift the answer for the done ticket too.
   const odd = '.scratch/f/issues/01-a\nb.md'
   const done = '.scratch/f/issues/02-done.md'
-  const blobs = batch({ [`refs/heads/feat/a:${done}`]: 'Status: done' })
+  const blobs = catFile({ [`refs/heads/feat/a:${done}`]: 'Status: done' })
   const io = fakeIo({}, committedGit(`${odd}\0${done}\0`, blobs))
-  const read = await readTickets(io, '.scratch/f', FACTS, 'refs/heads/feat/a', ['feat/b'])
+  const read = await readTickets(io, '.scratch/f', FACTS, 'refs/heads/feat/a')
   expect(read?.tickets.map((t) => [t.path, t.status])).toEqual([[done, 'done']])
   expect(read?.unreadable).toEqual([
     { path: odd, why: 'line break in name' },
@@ -342,15 +385,15 @@ test('readTickets reports unreadable comparison copies even when the build copy 
   const copy = (b: string) => `refs/heads/${b}:${PATH}`
   // feat/b's copy is binary, feat/c has none, feat/d's record (the last) ends early while git reports success.
   for (const text of [BOLD_READY_TICKET, 'x'.repeat(1048577)]) {
-    const blobs = batch({
+    const blobs = catFile({
       [BUILD]: text,
       [OTHER]: 'Status: done\0',
       [copy('feat/d')]: 'x',
     })
     const cat = (stdin: string) => ({ code: 0, out: blobs(stdin).slice(0, -2), truncated: false })
-    const io = fakeIo({}, committedGit(`${PATH}\0`, cat))
-    const branches = ['feat/b', 'feat/c', 'feat/d']
-    const read = await readTickets(io, '.scratch/f', FACTS, 'refs/heads/feat/a', branches)
+    const refs = ['feat/a', 'feat/b', 'feat/c', 'feat/d'].map((b) => `refs/heads/${b}\n`).join('')
+    const io = fakeIo({}, committedGit(`${PATH}\0`, cat, refs))
+    const read = await readTickets(io, '.scratch/f', FACTS, 'refs/heads/feat/a')
     expect(read?.tickets.map((t) => [t.path, t.status, t.differsOn])).toEqual(
       text === BOLD_READY_TICKET ? [[PATH, 'ready-for-agent', undefined]] : [],
     )
@@ -359,6 +402,40 @@ test('readTickets reports unreadable comparison copies even when the build copy 
       { path: PATH, why: 'not-text', branch: 'feat/b' },
       { path: PATH, why: 'error', branch: 'feat/d' },
     ])
+  }
+})
+
+// Spec section 5: any other branch where a ticket reads differently, by any field whereami reads, is listed.
+test('readTickets compares every other local branch; a listing or copy git cannot give is unknown', async () => {
+  const copy = (b: string) => `refs/heads/${b}:${PATH}`
+  const blobs = catFile({
+    [BUILD]: BOLD_READY_TICKET,
+    // The same status, another blocker; on a branch the note never linked.
+    [copy('feat/b')]: BOLD_READY_TICKET.replace('None (can start immediately)', '02'),
+    [copy('feat/same')]: BOLD_READY_TICKET,
+    // The default branch: a decision there.
+    [copy('main')]: `${BOLD_READY_TICKET}\nType: task`,
+  })
+  const refs = ['feat/a', 'feat/b', 'feat/same', 'main'].map((b) => `refs/heads/${b}\n`).join('')
+  const read = (cat: (stdin: string) => GitResult | string, listed: GitResult | string | null) =>
+    readTickets(
+      fakeIo({}, committedGit(`${PATH}\0`, cat, listed)),
+      '.scratch/f',
+      FACTS,
+      'refs/heads/feat/a',
+    )
+  const whole = await read(blobs, refs)
+  expect(whole?.tickets.map((t) => [t.status, t.differsOn])).toEqual([
+    ['ready-for-agent', ['feat/b', 'main']],
+  ])
+  expect(whole?.othersUnknown).toBe(false)
+  // The listing fails or is cut: the tickets stand, the comparison is unknown.
+  for (const listed of [null, { code: 0, out: refs, truncated: true }]) {
+    const unknown = await read(blobs, listed)
+    expect(unknown?.tickets.map((t) => [t.status, t.differsOn])).toEqual([
+      ['ready-for-agent', undefined],
+    ])
+    expect(unknown?.othersUnknown).toBe(true)
   }
 })
 

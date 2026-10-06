@@ -45,12 +45,13 @@ export type ReaderResult = {
   unsupported?: string
 }
 
-// at: ISO time
+// at: ISO time. head: HEAD when the skill started, null before the first commit; absent when git could not
+// read it, so the work after it is unknown.
 export type Observed = {
   skill: string
   doc: string
-  branch: string | null
-  head: string | null
+  branch?: string | null
+  head?: string | null
   at: string
 }
 
@@ -106,7 +107,8 @@ export type RepoFacts = {
   // null: confirmed detached HEAD; undefined: discovery failed or was truncated. Task 14 must not treat
   // undefined as detached or replace an unknown buildBranch result with the default branch or HEAD.
   branchRef: string | null | undefined
-  head: string | null
+  // null: confirmed no commit yet; undefined: git could not read HEAD (failed or cut), never "no commits".
+  head: string | null | undefined
   defaultBranch: string | null
   // Canonical default identity from the full origin/HEAD target, else a confirmed main/master probe.
   // null: confirmed no default; undefined: identity discovery unknown. Task 14 uses this for exclusions

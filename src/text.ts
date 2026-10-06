@@ -57,6 +57,7 @@ function progress(h: Headline, done: string): string[] {
   const [n, m] = h.count ?? [0, 0]
   const mark = h.weak ? ' ?' : m > 0 ? done : ''
   const parts = [`${h.phase}${m > 0 ? ` ${n}/${m}` : ''}${mark}`]
+  if (h.planned) parts.push(`${h.planned} tasks, no progress recorded`)
   if (h.decisions && h.decisions[1] > 0) parts.push(`${h.decisions[0]}/${h.decisions[1]} decisions`)
   if (h.blocked > 0) parts.push(`${h.blocked} blocked`)
   return parts

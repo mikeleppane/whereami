@@ -7,7 +7,7 @@ import type {
 } from 'claude-code'
 import { absolutePath, classifyDoc, docFromArgs } from '../src/feature'
 import { readNotes } from '../src/gather'
-import { answered, type Io, MAX_READ } from '../src/io'
+import { answered, branchOf, headOf, type Io, MAX_READ } from '../src/io'
 import { type ForgetMarker, featureFiles, paths } from '../src/notes'
 import { refresh, type SessionFacts } from '../src/refresh'
 import { paneTree } from '../src/render'
@@ -289,12 +289,17 @@ async function started($: EngineInterface, skill: string, args: string) {
     return
   }
   const path = `${root}/${doc.path}`
+  // Branch and HEAD now, not as the last refresh saw them: there may have been none yet, or a commit or worktree
+  // switch since. Either left out when git cannot tell.
+  const io = makeIo($, dir)
+  const branch = await branchOf(io)
+  const head = await headOf(io)
   session.skillDocs.push(path)
   session.observed.push({
     skill,
     doc: path,
-    branch: facts?.branch ?? null,
-    head: facts?.head ?? null,
+    ...(branch === undefined ? {} : { branch }),
+    ...(head === undefined ? {} : { head }),
     at: new Date(await $.clock.now()).toISOString(),
   })
 }

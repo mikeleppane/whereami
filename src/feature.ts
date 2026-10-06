@@ -281,13 +281,14 @@ export function resolveFeature(input: IdentityInput): Identity {
   const all = [...candidates.values()]
     .filter((c) => !dropped.has(c.id))
     .sort((a, b) => b.lastChange - a.lastChange)
-  // The user's pick comes before every rule below, finished giving way included.
+  // The user's pick comes before every rule below, finished giving way included; on the default branch it is
+  // still marked `?` (spec section 4).
   const picked = all.find((c) => c.id === input.chosen)
   if (picked)
     return {
       kind: 'one',
       id: picked.id,
-      weak: false,
+      weak: input.isDefault,
       ...(picked.create ? { create: picked.create } : {}),
     }
   const active = all.filter((c) => !c.finished)
@@ -302,7 +303,8 @@ export function resolveFeature(input: IdentityInput): Identity {
   })
 
   const recorded = active.filter((c) => c.why.includes('ledger') || c.why.includes('skill'))
-  if (recorded.length === 1 && recorded[0]) return one(recorded[0], false)
+  // Whatever links it, a feature shown on the default branch is marked `?` (spec section 4).
+  if (recorded.length === 1 && recorded[0]) return one(recorded[0], input.isDefault)
   const left = active.length > 0 ? active : all
   if (left.length === 1 && left[0]) {
     return one(left[0], input.isDefault || left[0].why.every((why) => why === 'read'))
