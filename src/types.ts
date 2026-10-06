@@ -92,8 +92,23 @@ export type GitResult = { code: number; out: string; truncated: boolean }
 export type RepoFacts = {
   root: string
   commonDir: string
-  mainRoot: string | null
+  // null: a successful listing found no main checkout (including a bare repo); undefined: discovery failed.
+  // A refresh needing that fallback must keep the ticket inventory unknown, never substitute an empty one.
+  mainRoot: string | null | undefined
+  // branch and defaultBranch are hook-parity display/key names, not branch identities.
   branch: string | null
+  // Full symbolic HEAD target. Strip refs/heads/ for note identities; use the full ref for revisions.
+  // null: confirmed detached HEAD; undefined: discovery failed or was truncated. Task 14 must not treat
+  // undefined as detached or replace an unknown buildBranch result with the default branch or HEAD.
+  branchRef: string | null | undefined
   head: string | null
   defaultBranch: string | null
+  // Canonical default identity from the full origin/HEAD target, else a confirmed main/master probe.
+  // null: confirmed no default; undefined: identity discovery unknown. Task 14 uses this for exclusions
+  // and default-branch decisions, never defaultBranch (display only) or a name derived from defaultRef.
+  defaultName: string | null | undefined
+  // defaultRef: the default branch as a full ref for revision arguments (`refs/heads/<b>`, else
+  // `refs/remotes/origin/<b>`), from origin/HEAD's full target; null when none exists or git cannot tell.
+  // A null ref does not erase defaultName: identity can be known even when the usable revision is not.
+  defaultRef: string | null
 }

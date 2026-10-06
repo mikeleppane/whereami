@@ -1,8 +1,7 @@
 import type { EngineInterface, Register } from 'claude-code'
-import { type Io, repoFacts } from '../src/io'
+import { type Io, MAX_READ, repoFacts } from '../src/io'
 import { branchFiles, paths } from '../src/notes'
 
-const MAX_READ = 1048576
 const NO_GIT = { code: -1, out: '', truncated: false }
 
 // Every file whereami writes: an absolute <common dir>/whereami/<branches|features>/<key>/<file>.
