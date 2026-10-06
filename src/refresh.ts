@@ -1,6 +1,7 @@
 import {
   classifyDoc,
   type DocRef,
+  documentGroup,
   featureDocs,
   type IdentityInput,
   resolveFeature,
@@ -22,7 +23,7 @@ import { type Io, repoFacts } from './io'
 import { keyOf } from './keys'
 import { type MattResult, readMatt } from './matt'
 import { type FeatureState, nextAction, phaseOf } from './next'
-import { branchFiles, featureFiles, paths } from './notes'
+import { branchFiles, type ForgetMarker, featureFiles, paths } from './notes'
 import { remember } from './remember'
 import {
   type PlanInfo,
@@ -46,11 +47,20 @@ export type SessionFacts = {
   agentsRunning: number
   agentsBeforeClear: number
   installed: Set<string>
-  chosen?: string
+  chosen?: {
+    id: string
+    commonDir: string
+    branchRef: string | null
+    root: string
+  }
   since: number
 }
 
-export type RefreshResult = { view: View | null; facts: RepoFacts | null }
+export type RefreshResult = {
+  view: View | null
+  facts: RepoFacts | null
+  forget?: ForgetMarker
+}
 
 const BUILD_SKILLS = ['superpowers:subagent-driven-development', 'superpowers:executing-plans']
 const PLAN_EDITED = 'plan edited since the build started'
@@ -168,7 +178,7 @@ export async function refresh(io: Io, s: SessionFacts): Promise<RefreshResult> {
     : null
   const isDefault = known && branch !== null && branch === facts.defaultName
   const linkable = known ? branch : null
-  const { notes, invalid, finished } = await readNotes(io, paths(facts.commonDir).root)
+  const { notes, invalid, finished, forgotten } = await readNotes(io, paths(facts.commonDir).root)
   // A ledger is identity evidence only when its header names its plan-path's plan (spec section 4 rule 1).
   const ledgers: { dir: string; plan: string; read: ReadOutcome; matches: boolean }[] = []
   for (const l of await ledgerDirs(io, root)) {
@@ -204,14 +214,39 @@ export async function refresh(io: Io, s: SessionFacts): Promise<RefreshResult> {
   for (const doc of evidence) {
     const at = await io.mtimeMs(`${root}/${doc.path}`)
     if (at !== null) docTimes[doc.path] = at
-    const spec = doc.kind === 'sp-plan' ? (await readPlan(io, root, doc.path))?.spec : undefined
-    if (spec) planSpecs[doc.path] = repoRelative(spec, root)
+  }
+  const plans = new Set(
+    [
+      ...evidence,
+      ...classify(forgotten.flatMap((marker) => marker?.documents ?? [])),
+      ...classify(
+        notes.flatMap((n) => [
+          ...(n.docs.plan === undefined ? [] : [n.docs.plan]),
+          ...(n.last?.plan === undefined ? [] : [n.last.plan]),
+          ...n.observed.map((o) => o.doc),
+        ]),
+      ),
+    ]
+      .filter((doc) => doc.kind === 'sp-plan')
+      .map((doc) => doc.path),
+  )
+  for (const path of plans) {
+    const spec = (await readPlan(io, root, path))?.spec
+    if (spec) planSpecs[path] = repoRelative(spec, root)
   }
   const refs = await noteRefs(io, root, notes, finished)
+  // A pick overrides recorded links only where it was made. Detached worktrees have separate identities.
+  const chosen =
+    s.chosen?.commonDir === facts.commonDir &&
+    s.chosen.branchRef === facts.branchRef &&
+    (facts.branchRef !== null || s.chosen.root === root)
+      ? s.chosen.id
+      : undefined
   const input: IdentityInput = {
     branch,
     isDefault,
     notes: refs,
+    forgotten,
     ledgerPlans,
     skillDocs,
     ...(readDoc ? { readDoc } : {}),
@@ -219,17 +254,9 @@ export async function refresh(io: Io, s: SessionFacts): Promise<RefreshResult> {
     commitDocs,
     planSpecs,
     docTimes,
+    ...(chosen === undefined ? {} : { chosen }),
   }
-  let identity = resolveFeature(input)
-  const chosen =
-    identity.kind === 'choose' ? identity.candidates.find((c) => c.id === s.chosen) : undefined
-  if (chosen)
-    identity = {
-      kind: 'one',
-      id: chosen.id,
-      weak: false,
-      ...(chosen.create ? { create: chosen.create } : {}),
-    }
+  const identity = resolveFeature(input)
   if (identity.kind === 'none') {
     // No candidate shows nothing (spec section 4 rule 7): an earlier summary here must not print. An empty
     // message is one the hook rejects; a branch with no summary gets no folder.
@@ -427,5 +454,15 @@ export async function refresh(io: Io, s: SessionFacts): Promise<RefreshResult> {
     ...abs(ticketsDir),
   ]
   await writeSummary(io, facts, view, id, watch)
-  return { view, facts }
+  const documents = documentGroup(
+    [
+      ...Object.values(base.docs),
+      ...Object.values(kept.note.docs),
+      ...featureDocs(input, id).map((doc) => doc.path),
+      ...classify(base.observed.map((o) => o.doc)).map((doc) => doc.path),
+      ...(base.last?.plan === undefined ? [] : [base.last.plan]),
+    ].filter((path): path is string => path !== undefined),
+    planSpecs,
+  )
+  return { view, facts, forget: { id, documents: [...documents].sort() } }
 }

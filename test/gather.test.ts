@@ -192,7 +192,7 @@ test('ledgerDirs finds every ledger folder naming a plan and skips the flat ledg
   ])
 })
 
-test('readNotes lists corrupt notes as invalid and skips forgotten ones', async () => {
+test('readNotes lists corrupt notes as invalid and reads tombstones independently of notes', async () => {
   const root = '/r/.git/whereami'
   const auth = note({ id: 'auth' })
   const io = fakeIo(
@@ -200,8 +200,10 @@ test('readNotes lists corrupt notes as invalid and skips forgotten ones', async 
       [`${root}/features/auth/note.json`]: serializeNote(auth),
       [`${root}/features/auth/finished`]: '1791200000\n',
       [`${root}/features/broken/note.json`]: '{"version": 1, "id": ',
-      [`${root}/features/gone/note.json`]: serializeNote(note({ id: 'gone' })),
-      [`${root}/features/gone/forget`]: '',
+      [`${root}/features/gone/note.json`]: '{"version":',
+      [`${root}/features/gone/forget`]:
+        '{"version":1,"id":"gone","documents":[".scratch/gone/"]}\n',
+      [`${root}/features/legacy/forget`]: 'forget\n',
       [`${root}/features/open/note.json`]: serializeNote(note({ id: 'open' })),
       [`${root}/features/open/finished`]: '',
     },
@@ -211,6 +213,7 @@ test('readNotes lists corrupt notes as invalid and skips forgotten ones', async 
     notes: [auth, note({ id: 'open' })],
     invalid: ['broken'],
     finished: { auth: 1791200000 },
+    forgotten: [{ id: 'gone', documents: ['.scratch/gone/'] }, null],
   })
 })
 

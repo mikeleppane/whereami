@@ -1,9 +1,18 @@
-import type { EngineInterface, Register } from 'claude-code'
+import type {
+  CommandRunResult,
+  EngineInterface,
+  Register,
+  RenderSurface,
+  UiPressArgument,
+} from 'claude-code'
 import { absolutePath, classifyDoc, docFromArgs } from '../src/feature'
+import { readNotes } from '../src/gather'
 import { answered, type Io, MAX_READ } from '../src/io'
+import { type ForgetMarker, featureFiles, paths } from '../src/notes'
 import { refresh, type SessionFacts } from '../src/refresh'
-import { bandText, cut, type View } from '../src/text'
-import type { RepoFacts } from '../src/types'
+import { paneTree } from '../src/render'
+import { bandText, cut, plainText, type View } from '../src/text'
+import type { Note, RepoFacts } from '../src/types'
 
 const NO_GIT = { code: -1, out: '', truncated: false }
 
@@ -102,6 +111,7 @@ function makeIo($: EngineInterface, cwd: string): Io {
 }
 
 const BAND = { plugin: 'whereami', key: 'band' } as const
+const PANE = 'whereami'
 const FAILED = 'whereami · ?'
 const THROTTLE = 1000
 const LIBRARY = /^(?:superpowers|mattpocock-skills):/
@@ -147,57 +157,95 @@ let cwd = ''
 let session = fresh(0)
 let facts: RepoFacts | null = null
 let view: View | null = null
+let forgetMarker: ForgetMarker | null = null
+// Rendered actions and in-flight choices belong to the identity session that produced them.
+let generation = 0
+let viewGeneration = 0
 let beforeClear = new Set<string>()
 // Section 4 rule 2: open from a library start without a document until the main loop's turn ends.
 let reading = false
+// One queue: every refresh and every note change starts after the one before it ended, so a change never
+// lands between a refresh's read and its write. `tail` settles once the queue is empty.
+let tail: Promise<unknown> = Promise.resolve()
 // The scheduler: one loop at a time. A request while it waits joins that run; one while it runs asks for
-// one follow-up. `last` is when the last run started: none at first, so the start's runs at once.
-// `executing` is the run under way, never the wait before it.
+// one follow-up. `last` is when the last run started, scheduled or awaited: none at first, so the start's
+// runs at once.
 let busy = false
 let waiting = false
 let again = false
 let failed = false
 let last = Number.NEGATIVE_INFINITY
-let executing: Promise<void> | null = null
+// What the last press in the pane came to, shown at its top; null when there is nothing to say.
+let notice: string | null = null
 
-async function run($: EngineInterface) {
+async function run(
+  $: EngineInterface,
+  chosen?: SessionFacts['chosen'],
+  at = generation,
+): Promise<boolean> {
   try {
+    let wait = last + THROTTLE - (await $.clock.now())
+    while (wait > 0) {
+      await $.clock.sleep(wait)
+      wait = last + THROTTLE - (await $.clock.now())
+    }
     last = await $.clock.now()
     // The session's directory now, so a worktree switch is followed; the start's when it cannot be told.
-    const r = await refresh(makeIo($, await $.session.cwd().catch(() => cwd)), session)
+    const dir = await $.session.cwd().catch(() => cwd)
+    if (at !== generation) return false
+    const r = await refresh(makeIo($, dir), chosen === undefined ? session : { ...session, chosen })
+    if (at !== generation) return false
     facts = r.facts
     view = r.view
+    forgetMarker = r.forget ?? null
+    viewGeneration = at
+    if (failed) notice = null
     failed = false
     await $.state.set(BAND, view === null ? '' : bandText(view, Number.POSITIVE_INFINITY))
   } catch (err) {
     if (!failed) $.ui.log(`whereami: refresh failed: ${err}`, { to: 'debug' })
+    if (at !== generation) return false
     failed = true
     view = null
+    forgetMarker = null
+    notice = 'refresh failed; open /whereami to retry'
     await $.state.set(BAND, FAILED).catch(() => undefined)
   }
+  $.ui.invalidate('ui.render')
+  return !failed
+}
+
+// Runs job once every job queued before it has ended; a failed job never stops the ones after it.
+function serial<T>(job: () => Promise<T>): Promise<T> {
+  const done = tail.then(job)
+  tail = done.catch(() => undefined)
+  return done
+}
+
+// A scheduled refresh when its turn comes: false, and nothing run, while one ran less than a second ago.
+async function due($: EngineInterface) {
+  if (last + THROTTLE > (await $.clock.now())) return false
+  waiting = false
+  await run($)
+  return true
 }
 
 async function loop($: EngineInterface) {
   try {
     do {
       again = false
-      if (last !== Number.NEGATIVE_INFINITY) {
-        waiting = true
+      waiting = true
+      // Queued with no await before it on the first run, so a session ending right after its start sees it.
+      while (!(await serial(() => due($)))) {
         const wait = last + THROTTLE - (await $.clock.now())
         if (wait > 0) await $.clock.sleep(wait)
-        waiting = false
       }
-      // Set with no await before it on the first run, so a session ending right after its start sees it.
-      executing = run($)
-      await executing
-      executing = null
     } while (again)
   } catch (err) {
     $.ui.log(`whereami: refresh not run: ${err}`, { to: 'debug' })
   } finally {
     busy = false
     waiting = false
-    executing = null
   }
 }
 
@@ -251,9 +299,188 @@ async function started($: EngineInterface, skill: string, args: string) {
   })
 }
 
+// The branch a note may list: as refresh links it, none when detached or git could not tell.
+function linkable(f: RepoFacts): string | null {
+  if (f.defaultName === undefined || !f.branchRef?.startsWith('refs/heads/')) return null
+  return f.branchRef.slice('refs/heads/'.length)
+}
+
+// Rewrites the notes `change` alters (its note.json and branches files); false when there is no branch to
+// link. A file not written rejects.
+async function relink($: EngineInterface, change: (n: Note, branch: string) => Note | null) {
+  const branch = facts === null ? null : linkable(facts)
+  if (facts === null || branch === null) return false
+  const io = makeIo($, cwd)
+  const where = paths(facts.commonDir)
+  for (const note of (await readNotes(io, where.root)).notes) {
+    const next = change(note, branch)
+    if (next === null) continue
+    const files = featureFiles(next, null)
+    for (const name of ['note.json', 'branches'] as const) {
+      const path = `${where.feature(note.id)}/${name}`
+      if (!(await io.write(path, files[name]))) throw new Error(`not written: ${path}`)
+    }
+  }
+  return true
+}
+
+const without = (list: string[], b: string) => list.filter((x) => x !== b)
+
+// "This is <id>": that note lists the branch, no other note does (spec section 4 rule 6). Once saved, the
+// pick holds for this session on this repository's branch (or this detached worktree), not a later switch.
+async function choose($: EngineInterface, id: string, at: number) {
+  if (facts === null || facts.branchRef === undefined)
+    throw new Error('branch unavailable; open /whereami and try again')
+  const chosen = { id, commonDir: facts.commonDir, branchRef: facts.branchRef, root: facts.root }
+  await relink($, (n, b) => {
+    if (n.id === id)
+      return n.branches.includes(b) && !n.unlinked.includes(b)
+        ? null
+        : { ...n, branches: [...without(n.branches, b), b], unlinked: without(n.unlinked, b) }
+    return n.branches.includes(b) ? { ...n, branches: without(n.branches, b) } : null
+  })
+  if (at !== generation) throw new Error('stale action; open /whereami and try again')
+  // A candidate need not have a note yet. Refresh with a provisional pick; publish it only once
+  // that note and its branch files have actually been saved.
+  const ok = await run($, chosen, at)
+  if (at !== generation) throw new Error('stale action; open /whereami and try again')
+  if (!ok) throw new Error('refresh failed')
+  session.chosen = chosen
+}
+
+// "Not this feature": the branch leaves the note and stays out of it.
+async function unlink($: EngineInterface) {
+  const id = view?.kind === 'feature' ? view.featureId : null
+  const done = await relink($, (n, b) =>
+    n.id === id
+      ? { ...n, branches: without(n.branches, b), unlinked: [...without(n.unlinked, b), b] }
+      : null,
+  )
+  if (!done) throw new Error('no branch here to unlink')
+}
+
+// Marks the shown feature forgotten (the hook deletes it at the next start) and clears the view and band.
+// Null when no feature is shown; a marker not written rejects.
+async function forget($: EngineInterface): Promise<string | null> {
+  if (view?.kind !== 'feature' || facts === null) return null
+  const id = view.featureId
+  if (forgetMarker?.id !== id || forgetMarker.documents.length === 0)
+    throw new Error('feature documents unavailable; open /whereami and try again')
+  const path = `${paths(facts.commonDir).feature(id)}/forget`
+  const marker = `${JSON.stringify({ version: 1, ...forgetMarker })}\n`
+  if (!(await makeIo($, cwd).write(path, marker))) throw new Error(`not written: ${path}`)
+  view = null
+  forgetMarker = null
+  await $.state.set(BAND, '').catch(() => undefined)
+  return id
+}
+
+// Spec section 7 "Drafting": only a box holding exactly '' is filled; the user's text is never touched and
+// nothing is submitted. Returns the notice to show, null when the command is in the box.
+async function draft($: EngineInterface, command: string, surface: RenderSurface) {
+  const box = await $.prompt.read().catch(() => null)
+  let refused = false
+  if (box?.text === '') {
+    const r = await $.prompt.fill({ text: command }).catch(() => ({ isFilled: false as const }))
+    if (r.isFilled) return null
+    if ('refusal' in r && r.refusal === 'dialog') return 'close the dialog, then press Draft again'
+    refused = true
+  }
+  const copied = await $.ui.copy({ text: command, surface }).catch(() => ({ isCopied: false }))
+  if (!copied.isCopied) return `copy this command: ${command}`
+  return refused
+    ? 'copied: this window has no prompt box'
+    : 'your prompt has text, so the command was copied instead'
+}
+
+function sameAction(p: UiPressArgument, shown: View | null, at: RepoFacts | null): boolean {
+  if (
+    failed ||
+    shown === null ||
+    view === null ||
+    at === null ||
+    facts === null ||
+    at.root !== facts.root ||
+    at.commonDir !== facts.commonDir ||
+    at.branchRef !== facts.branchRef ||
+    shown.kind !== view.kind
+  )
+    return false
+  if (shown.kind === 'choose' && view.kind === 'choose')
+    return (
+      p.element.startsWith('choose:') &&
+      shown.candidates.some((c) => `choose:${c.id}` === p.element) &&
+      view.candidates.some((c) => `choose:${c.id}` === p.element)
+    )
+  if (shown.kind !== 'feature' || view.kind !== 'feature' || shown.featureId !== view.featureId)
+    return false
+  if (p.element === 'draft')
+    return shown.next?.command !== undefined && shown.next.command === view.next?.command
+  if (p.element.startsWith('choose:'))
+    return (
+      shown.switchedFrom !== undefined &&
+      shown.switchedFrom === view.switchedFrom &&
+      p.element === `choose:${shown.switchedFrom}`
+    )
+  return p.element === 'forget' || p.element === 'unlink'
+}
+
+// Keep the rendered target across the queue wait; a replacement feature is never an implicit target.
+async function pressed(
+  $: EngineInterface,
+  p: UiPressArgument,
+  shown: View | null,
+  at: RepoFacts | null,
+  renderedGeneration: number,
+) {
+  try {
+    if (renderedGeneration !== generation || !sameAction(p, shown, at))
+      throw new Error('stale action; open /whereami and try again')
+    if (p.element === 'draft') {
+      const command = shown?.kind === 'feature' ? shown.next?.command : undefined
+      notice = command === undefined ? null : await draft($, command, p.surface)
+    } else if (p.element === 'forget') {
+      const id = await forget($)
+      notice = id === null ? null : `forgot ${id}`
+    } else if (p.element === 'unlink' || p.element.startsWith('choose:')) {
+      if (p.element === 'unlink') {
+        await unlink($)
+        if (!(await run($))) throw new Error('refresh failed')
+      } else await choose($, p.element.slice('choose:'.length), renderedGeneration)
+      notice = null
+    }
+  } catch (err) {
+    $.ui.log(`whereami: ${p.element} failed: ${err}`, { to: 'debug' })
+    notice = `not done: ${err instanceof Error ? err.message : err}`
+  }
+  $.ui.invalidate('ui.render')
+}
+
+// `/whereami` and `/whereami forget`, in their turn in the queue. The text is the model's to read: ids, paths,
+// counts, statuses and the next command only (plainText), never document, ticket or ledger text.
+async function whereami($: EngineInterface, args: string): Promise<CommandRunResult> {
+  const ok = await run($)
+  if (!ok) return { text: 'whereami: refresh failed' }
+  notice = null
+  if (args.trim() === 'forget') {
+    const id = view?.kind === 'feature' ? view.featureId : null
+    const text = await forget($).then(
+      (forgot) => (forgot === null ? 'whereami: nothing to forget' : `whereami: forgot ${forgot}`),
+      () => `whereami: could not forget ${id}`,
+    )
+    $.ui.invalidate('ui.render')
+    return { text }
+  }
+  await $.ui
+    .open({ id: PANE, title: 'whereami' })
+    .catch((err) => $.ui.log(`whereami: pane not opened: ${err}`, { to: 'debug' }))
+  return { text: plainText(view) }
+}
+
 export const register: Register = (on) => {
   on('session.start', async ($, e, next) => {
     const result = await next(e)
+    generation++
     cwd = e.cwd
     session = fresh(await $.clock.now(), await installedCommands($))
     beforeClear = new Set()
@@ -272,13 +499,15 @@ export const register: Register = (on) => {
   on('session.end', async ($, e, next) => {
     const result = await next(e)
     if (e.reason !== 'clear') {
-      // A refresh under way finishes, so its summary is whole; one still waiting its turn is not run.
-      await executing
+      // What the queue holds finishes, so a summary is whole; a refresh waiting out the second is not run.
+      await tail
       return result
     }
+    generation++
     beforeClear = new Set((await runningAgents($)) ?? [])
     session = { ...session, skillDocs: [], writtenDocs: [], since: await $.clock.now() }
     delete session.readDoc
+    delete session.chosen
     reading = false
     await recount($)
     schedule($)
@@ -286,6 +515,7 @@ export const register: Register = (on) => {
   })
 
   on('command.run', async ($, e, next) => {
+    if (e.command === 'whereami') return serial(() => whereami($, e.args))
     const result = await next(e)
     if (LIBRARY.test(e.command)) {
       await started($, e.command, e.args)
@@ -331,6 +561,15 @@ export const register: Register = (on) => {
     else await recount($)
     schedule($)
     return result
+  })
+
+  on('ui.render', { component: 'Pane', requestId: PANE }, async ($, e) => {
+    const shown = view
+    const at = facts
+    const renderedGeneration = viewGeneration
+    return paneTree($.ui.resolve(e), shown, notice, (p) => {
+      serial(() => pressed($, p, shown, at, renderedGeneration))
+    })
   })
 
   on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => {

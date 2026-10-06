@@ -1,7 +1,8 @@
 import type { NoteRef } from './feature'
 import { answered, gitLines, gitOut, hasBranch, hasRef, type Io, parseCatFileBatch } from './io'
+import { keyOf } from './keys'
 import { parseTicket, type Ticket } from './matt'
-import { parseNote } from './notes'
+import { type ForgetMarker, parseForget, parseNote } from './notes'
 import type { Note, RepoFacts } from './types'
 
 export type Commit = { sha: string; subject: string; files: string[] }
@@ -122,21 +123,33 @@ export async function writtenSince(
 }
 
 // root: <common dir>/whereami. invalid: folder names whose note.json is there but not a note.
-// finished: note id to the epoch seconds in its `finished` file.
+// finished: note id to epoch seconds. forgotten: independent marker sets; null means unknown, so fail closed.
 export async function readNotes(
   io: Io,
   root: string,
-): Promise<{ notes: Note[]; invalid: string[]; finished: Record<string, number> }> {
+): Promise<{
+  notes: Note[]
+  invalid: string[]
+  finished: Record<string, number>
+  forgotten: (ForgetMarker | null)[]
+}> {
   const notes: Note[] = []
   const invalid: string[] = []
+  const forgotten: (ForgetMarker | null)[] = []
   // No prototype: an id like `constructor` or `__proto__` is an entry of its own, or none.
   const finished: Record<string, number> = Object.create(null)
   for (const name of await io.list(`${root}/features`)) {
     const dir = `${root}/features/${name}`
-    if ((await io.mtimeMs(`${dir}/forget`)) !== null) continue
+    const forget = (await io.mtimeMs(`${dir}/forget`)) !== null
+    if (forget) {
+      const r = await io.read(`${dir}/forget`)
+      const marker = r.ok ? parseForget(r.text) : null
+      forgotten.push(marker !== null && keyOf(marker.id) === name ? marker : null)
+      continue
+    }
     const r = await io.read(`${dir}/note.json`)
-    if (!r.ok && r.why === 'missing') continue
     const note = r.ok ? parseNote(r.text) : null
+    if (!r.ok && r.why === 'missing') continue
     if (note === null) {
       invalid.push(name)
       continue
@@ -145,7 +158,7 @@ export async function readNotes(
     const at = await io.read(`${dir}/finished`)
     if (at.ok && /^\d+$/.test(at.text.trim())) finished[note.id] = Number(at.text.trim())
   }
-  return { notes, invalid, finished }
+  return { notes, invalid, finished, forgotten }
 }
 
 export async function noteRefs(

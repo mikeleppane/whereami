@@ -61,6 +61,8 @@ export function serializeNote(note: Note): string {
   return `${JSON.stringify(note, null, 2)}\n`
 }
 
+export type ForgetMarker = { id: string; documents: string[] }
+
 type Obj = Record<string, unknown>
 const isObj = (v: unknown): v is Obj => typeof v === 'object' && v !== null && !Array.isArray(v)
 const isStr = (v: unknown): v is string => typeof v === 'string'
@@ -77,6 +79,26 @@ const PHASES = ['design', 'plan', 'build', 'review', 'done', 'merged', 'unknown'
 const STATES = ['open', 'in-progress', 'waiting', 'blocked', 'complete', 'dropped', 'unknown']
 
 const isDocs = (v: unknown): v is Docs => record(v, isStr)
+
+// The marker is self-contained: note.json may disappear or lose fields before the hook deletes the folder.
+// Old `forget\n` markers and unreadable/malformed sets mean unknown ownership, never an empty set.
+export function parseForget(text: string): ForgetMarker | null {
+  let v: unknown
+  try {
+    v = JSON.parse(text)
+  } catch {
+    return null
+  }
+  return isObj(v) &&
+    v.version === 1 &&
+    isStr(v.id) &&
+    v.id !== '' &&
+    strs(v.documents) &&
+    v.documents.length > 0 &&
+    v.documents.every((path) => path.trim() !== '')
+    ? { id: v.id, documents: v.documents }
+    : null
+}
 
 const isObserved = (v: unknown): v is Observed =>
   isObj(v) &&

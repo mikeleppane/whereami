@@ -1,3 +1,4 @@
+import type { ForgetMarker } from './notes'
 import { repoRelative } from './superpowers'
 import type { Docs } from './types'
 
@@ -38,6 +39,7 @@ export type Candidate = {
 
 // planSpecs: plan path to its `**Spec:**` path, read before identity
 // docTimes: repo-relative document path to its change time in epoch ms; a missing path is unknown
+// chosen: the feature the user picked in the view; it wins while it is still a candidate
 export type IdentityInput = {
   branch: string | null
   isDefault: boolean
@@ -49,6 +51,8 @@ export type IdentityInput = {
   commitDocs: DocRef[]
   planSpecs: Record<string, string>
   docTimes: Record<string, number>
+  chosen?: string
+  forgotten?: (ForgetMarker | null)[]
 }
 
 export type Identity =
@@ -132,9 +136,43 @@ export function ownerOf(
   return ownerOfPath(notes, spec, classifyRelative(spec)?.folder)
 }
 
+const mattFolder = (path: string) => /^(\.scratch\/[^/]+\/)/.exec(path)?.[1]
+const containsDocument = (documents: Set<string>, path: string) =>
+  documents.has(path) || documents.has(mattFolder(path) ?? '')
+
+// Plan/spec links run both ways; every Matt document belongs to its folder, including future tickets.
+export function documentGroup(paths: string[], planSpecs: Record<string, string>): Set<string> {
+  const documents = new Set<string>()
+  const add = (path: string) => {
+    documents.add(path)
+    const folder = mattFolder(path)
+    if (folder !== undefined) documents.add(folder)
+  }
+  for (const path of paths) add(path)
+  let size: number
+  do {
+    size = documents.size
+    for (const [plan, spec] of Object.entries(planSpecs))
+      if (containsDocument(documents, plan) || containsDocument(documents, spec)) {
+        add(plan)
+        add(spec)
+      }
+  } while (size !== documents.size)
+  return documents
+}
+
+function forgottenDocuments(input: IdentityInput): Set<string> {
+  return documentGroup(
+    (input.forgotten ?? []).flatMap((marker) => marker?.documents ?? []),
+    input.planSpecs,
+  )
+}
+
 // Each evidence document with the feature it joins: the note owning it, else the new feature of its group.
 function memberships(input: IdentityInput): Map<DocRef, string> {
   const { notes } = input
+  const forgotten = forgottenDocuments(input)
+  const unknown = input.forgotten?.includes(null) === true
   const specOf = (doc: DocRef) => {
     const path = doc.kind === 'sp-plan' ? input.planSpecs[doc.path] : undefined
     return path === undefined ? null : classifyRelative(path)
@@ -152,7 +190,11 @@ function memberships(input: IdentityInput): Map<DocRef, string> {
     ...(input.readDoc ? [input.readDoc] : []),
     ...input.writtenDocs,
     ...input.commitDocs,
-  ]
+  ].filter(
+    (doc) =>
+      !containsDocument(forgotten, doc.path) &&
+      !(unknown && ownerOf(notes, doc, input.planSpecs) === null),
+  )
   for (const doc of evidence) {
     const spec = specOf(doc)
     if (spec && ownerOf(notes, doc, input.planSpecs) === null)
@@ -169,7 +211,12 @@ function memberships(input: IdentityInput): Map<DocRef, string> {
     }
     const base = featureIdFor(doc)
     const id =
-      created.get(group(base)) ?? uniqueId(base, [...notes.map((n) => n.id), ...created.values()])
+      created.get(group(base)) ??
+      uniqueId(base, [
+        ...notes.map((n) => n.id),
+        ...(input.forgotten ?? []).flatMap((marker) => (marker === null ? [] : [marker.id])),
+        ...created.values(),
+      ])
     created.set(group(base), id)
     ids.set(doc, id)
   }
@@ -183,14 +230,18 @@ export function featureDocs(input: IdentityInput, id: string): DocRef[] {
 
 export function resolveFeature(input: IdentityInput): Identity {
   const { branch, notes } = input
+  const forgotten = forgottenDocuments(input)
   // The default branch never joins a feature: features with a branch of their own drop out there.
   const dropped = new Set(
     notes
       .filter(
         (n) =>
-          branch !== null &&
-          (n.unlinked.includes(branch) ||
-            (input.isDefault && n.branches.some((b) => b !== branch))),
+          Object.values(n.docs).some(
+            (path) => path !== undefined && containsDocument(forgotten, path),
+          ) ||
+          (branch !== null &&
+            (n.unlinked.includes(branch) ||
+              (input.isDefault && n.branches.some((b) => b !== branch)))),
       )
       .map((n) => n.id),
   )
@@ -207,7 +258,8 @@ export function resolveFeature(input: IdentityInput): Identity {
     add(note.id, why, { lastChange, finished: note.finished })
   const addDoc = (doc: DocRef, why: Why) => {
     const time = input.docTimes[doc.path] ?? 0
-    const id = ids.get(doc) ?? featureIdFor(doc)
+    const id = ids.get(doc)
+    if (id === undefined) return
     const note = notes.find((n) => n.id === id)
     if (note) return addNote(note, why, Math.max(note.lastChange, time))
     add(id, why, { lastChange: time, finished: false, create: doc })
@@ -229,6 +281,15 @@ export function resolveFeature(input: IdentityInput): Identity {
   const all = [...candidates.values()]
     .filter((c) => !dropped.has(c.id))
     .sort((a, b) => b.lastChange - a.lastChange)
+  // The user's pick comes before every rule below, finished giving way included.
+  const picked = all.find((c) => c.id === input.chosen)
+  if (picked)
+    return {
+      kind: 'one',
+      id: picked.id,
+      weak: false,
+      ...(picked.create ? { create: picked.create } : {}),
+    }
   const active = all.filter((c) => !c.finished)
   const finished = all.filter((c) => c.finished)
   const switchedFrom = active.length > 0 ? finished[0]?.id : undefined

@@ -69,6 +69,84 @@ test('a Superpowers build mid-way writes its note and the branch summary', async
   expect(io.written[`${W}/branches/feat%2Fauth/message`]).toMatch(/\n\.\n$/)
 })
 
+for (const marker of ['legacy', 'corrupt', 'wrong-version', 'wrong-id', 'empty', 'denied'] as const)
+  test(`a ${marker} forget marker blocks unowned discovery until cleanup but not owned work`, async () => {
+    const path = `${W}/features/auth/forget`
+    const contents = {
+      legacy: 'forget\n',
+      corrupt: '{"version":',
+      'wrong-version': '{"version":2,"id":"auth","documents":[".scratch/auth/"]}\n',
+      'wrong-id': '{"version":1,"id":"other","documents":[".scratch/auth/"]}\n',
+      empty: '{"version":1,"id":"auth","documents":[]}\n',
+      denied: '{"version":1,"id":"auth","documents":[".scratch/auth/"]}\n',
+    }
+    const files: Record<string, string> = {
+      ...spWorld(complete(1)),
+      [path]: contents[marker],
+      [`${W}/features/owned/note.json`]: serializeNote(
+        note({
+          id: 'owned',
+          branches: ['feat/auth'],
+          docs: { spec: 'docs/superpowers/specs/owned-design.md' },
+        }),
+      ),
+    }
+    const io = fakeIo(files, git(repo()))
+    const read = io.read
+    io.read = (p) =>
+      p === path && marker === 'denied' ? Promise.resolve({ ok: false, why: 'error' }) : read(p)
+    expect(feature((await refresh(io, session())).view).featureId).toBe('owned')
+    expect(Object.keys(io.written).filter((p) => p.endsWith('/note.json'))).toEqual([
+      `${W}/features/owned/note.json`,
+    ])
+    delete files[path]
+    expect(feature((await refresh(io, session())).view).featureId).toBe('auth')
+    expect(io.written[`${W}/features/auth/note.json`]).toBeDefined()
+  })
+
+test('forget snapshots all known documents and excludes later plan and Matt group links', async () => {
+  const otherPlan = 'docs/superpowers/plans/2026-10-06-rollout.md'
+  const map = '.scratch/auth/map.md'
+  const files: Record<string, string> = {
+    ...spWorld(complete(1)),
+    [`/r/${otherPlan}`]: `**Spec:** \`${SPEC}\`\n### Task 1: Roll out\n`,
+    [`/r/${map}`]: '# Auth map\n',
+    [`${W}/features/auth/note.json`]: serializeNote(
+      note({
+        branches: ['feat/auth'],
+        docs: { plan: PLAN, spec: SPEC, map, tickets: '.scratch/auth/issues/' },
+      }),
+    ),
+  }
+  const io = fakeIo(files, git(repo()))
+  const before = await refresh(io, session({ writtenDocs: [otherPlan] }))
+  expect(feature(before.view).featureId).toBe('auth')
+  expect({ ...before.forget, documents: before.forget?.documents.slice().sort() }).toEqual({
+    id: 'auth',
+    documents: ['.scratch/auth/', '.scratch/auth/issues/', map, PLAN, otherPlan, SPEC],
+  })
+  files[`${W}/features/auth/forget`] = `${JSON.stringify({ version: 1, ...before.forget })}\n`
+  delete files[`${W}/features/auth/note.json`]
+  // Old links disappear: only the snapshot can still connect the rollout plan to auth.
+  delete files[`/r/${PLAN}`]
+  delete files[`/r/${otherPlan}`]
+  const newSpec = 'docs/superpowers/specs/2026-10-06-replacement-design.md'
+  files[`/r/${otherPlan}`] = `**Spec:** \`${newSpec}\`\n`
+  const newPlan = 'docs/superpowers/plans/2026-10-06-followup.md'
+  files[`/r/${newPlan}`] = `**Spec:** \`.scratch/auth/spec.md\`\n`
+  const unrelated = 'docs/superpowers/specs/2026-10-07-auth-design.md'
+  const next = session({
+    skillDocs: [newPlan],
+    writtenDocs: [newSpec, '.scratch/auth/spec.md', '.scratch/auth/issues/02-new.md'],
+  })
+  expect((await refresh(io, next)).view).toBe(null)
+  // Another document with the same base id is not forgotten and must not overwrite the tombstone.
+  const after = feature((await refresh(io, { ...next, writtenDocs: [unrelated] })).view)
+  expect(after.featureId).toBe('auth-2')
+  expect(after.docs).toEqual({ spec: unrelated })
+  expect(io.written[`${W}/features/auth-2/note.json`]).toBeDefined()
+})
+
 test('lifecycle: review, done from the snapshot, merged, then unknown after a squash merge', async () => {
   const files = spWorld(complete(1), complete(2), complete(3))
   const r = repo({ log: `\0${TIP}\tplan\0\n${PLAN}\0` })
@@ -642,7 +720,8 @@ test('two notes linked to the branch ask to choose and write no note; a chosen o
   expect(io.written[`${W}/branches/feat%2Fauth/message`]).toContain('2 features could match')
   expect(Object.keys(io.written).filter((p) => p.includes('/features/'))).toEqual([])
 
-  expect(feature((await refresh(io, session({ chosen: 'b' }))).view).featureId).toBe('b')
+  const chosen = { id: 'b', commonDir: '/r/.git', branchRef: 'refs/heads/feat/auth', root: '/r' }
+  expect(feature((await refresh(io, session({ chosen }))).view).featureId).toBe('b')
 })
 
 test('a finished linked note gives way to a spec written this session', async () => {
