@@ -16,6 +16,7 @@ import {
   readTickets,
   relatedKeys,
   taskNumbers,
+  writtenSince,
 } from './gather'
 import { type Io, repoFacts } from './io'
 import { keyOf } from './keys'
@@ -34,7 +35,9 @@ import {
 import { summaryText, type View } from './text'
 import type { Docs, Note, Observed, ReadOutcome, RepoFacts } from './types'
 
-// What this session saw (spec section 4): document paths as given, made repo-relative here.
+// What this session saw (spec section 4): hooks anchor paths to the event's cwd; they become repo-relative here. `observed` is
+// kept for the notes across a clear; skillDocs, readDoc and writtenDocs are this session's identity evidence.
+// since: epoch ms the session started or was last cleared; a document changed from then on was written in it.
 export type SessionFacts = {
   observed: Observed[]
   skillDocs: string[]
@@ -44,6 +47,7 @@ export type SessionFacts = {
   agentsBeforeClear: number
   installed: Set<string>
   chosen?: string
+  since: number
 }
 
 export type RefreshResult = { view: View | null; facts: RepoFacts | null }
@@ -183,9 +187,10 @@ export async function refresh(io: Io, s: SessionFacts): Promise<RefreshResult> {
 
   const classify = (list: string[]) => list.flatMap((p) => classifyDoc(p, root) ?? [])
   const ledgerPlans = classify(ledgers.filter((l) => l.matches).map((l) => l.plan))
-  const skillDocs = classify([...s.skillDocs, ...observedNow.map((o) => o.doc)])
+  const skillDocs = classify(s.skillDocs)
   const readDoc = classify(s.readDoc === undefined ? [] : [s.readDoc])[0]
-  const writtenDocs = classify(s.writtenDocs)
+  const written = classify(s.writtenDocs).map((doc) => doc.path)
+  const writtenDocs = classify(await writtenSince(io, root, s.since, written))
   const commitDocs = classify((commits ?? []).flatMap((c) => c.files))
   const evidence = [
     ...ledgerPlans,

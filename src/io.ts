@@ -8,7 +8,10 @@ export type Io = {
   write(path: string, text: string): Promise<boolean>
   // Missing directories list nothing; other failures reject rather than inventing an empty inventory.
   list(dir: string): Promise<string[]>
+  // null only for confirmed absence; inspection failures reject.
   mtimeMs(path: string): Promise<number | null>
+  // What the path leads to; null when it is not there. A failed look rejects.
+  kind(path: string): Promise<'file' | 'dir' | 'other' | null>
   now(): Promise<number>
 }
 

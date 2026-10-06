@@ -66,8 +66,23 @@ function classifyRelative(path: string): DocRef | null {
   return { kind, path, folder }
 }
 
-export function classifyDoc(path: string, repoRoot: string): DocRef | null {
-  return classifyRelative(repoRelative(path, repoRoot))
+// Resolve event paths before the session can move to another directory. No filesystem access.
+export function absolutePath(path: string, cwd: string): string {
+  const slash = path.replace(/\\/g, '/')
+  const full = /^(?:\/|[A-Za-z]:\/)/.test(slash) ? slash : `${cwd.replace(/\\/g, '/')}/${slash}`
+  const root = /^(?:\/|[A-Za-z]:\/)/.exec(full)?.[0] ?? ''
+  const parts: string[] = []
+  for (const part of full.slice(root.length).split('/')) {
+    if (part === '..') parts.pop()
+    else if (part !== '' && part !== '.') parts.push(part)
+  }
+  return root + parts.join('/')
+}
+
+export function classifyDoc(path: string, repoRoot: string, cwd?: string): DocRef | null {
+  return classifyRelative(
+    repoRelative(cwd === undefined ? path : absolutePath(path, cwd), repoRoot),
+  )
 }
 
 export function featureIdFor(doc: DocRef): string {
@@ -83,13 +98,18 @@ export function uniqueId(base: string, taken: string[]): string {
   return `${base}-${n}`
 }
 
-export function docFromArgs(skill: string, args: string, repoRoot: string): DocRef | null {
+export function docFromArgs(
+  skill: string,
+  args: string,
+  repoRoot: string,
+  cwd?: string,
+): DocRef | null {
   if (!skill.startsWith('superpowers:') && !skill.startsWith('mattpocock-skills:')) return null
   // An unterminated quote fails closed: its contents never become a document.
   if (!/^(?:"[^"]*"|'[^']*'|[^"'])*$/.test(args)) return null
   // A token runs to the next whitespace outside quotes; its quotes are stripped.
   for (const [token] of args.matchAll(/(?:"[^"]*"|'[^']*'|[^\s"'])+/g)) {
-    const doc = classifyDoc(token.replace(/"([^"]*)"|'([^']*)'/g, '$1$2'), repoRoot)
+    const doc = classifyDoc(token.replace(/"([^"]*)"|'([^']*)'/g, '$1$2'), repoRoot, cwd)
     if (doc) return doc
   }
   return null

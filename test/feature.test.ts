@@ -41,6 +41,14 @@ test('classifyDoc makes ./ and absolute paths repo-relative and rejects other fi
     expected,
   )
   expect(classifyDoc('src/x.ts', '/r')).toBe(null)
+  for (const root of ['/wt/existing tree', 'C:/work/existing tree']) {
+    expect(
+      classifyDoc('../docs/superpowers/plans/2026-10-05-auth-refresh.md', root, `${root}/src`),
+    ).toEqual(expected)
+    expect(classifyDoc('../../elsewhere/docs/superpowers/plans/x.md', root, `${root}/src`)).toBe(
+      null,
+    )
+  }
 })
 
 test('featureIdFor strips the date and -design, and uses the Matt folder', () => {
@@ -90,6 +98,14 @@ test('docFromArgs reads a quoted path only for library skills', () => {
     ),
   ).toBe(null)
   expect(docFromArgs('commit', 'docs/superpowers/plans/x.md', '/r')).toBe(null)
+  expect(
+    docFromArgs(
+      'superpowers:executing-plans',
+      '"../docs/superpowers/plans/b.md"',
+      '/wt/existing tree',
+      '/wt/existing tree/src',
+    ),
+  ).toEqual(plan('docs/superpowers/plans/b.md'))
 })
 
 test('a ledger naming one note plan beats a linked note', () => {

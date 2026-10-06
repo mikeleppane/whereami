@@ -33,6 +33,12 @@ export function fakeIo(
       ),
     ],
     mtimeMs: async (path) => (path in files ? now : null),
+    kind: async (path) =>
+      path in files
+        ? 'file'
+        : Object.keys(files).some((p) => p.startsWith(`${path}/`))
+          ? 'dir'
+          : null,
     now: async () => now,
   }
 }

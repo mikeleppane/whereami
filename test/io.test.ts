@@ -408,8 +408,9 @@ async function startOn(
   const written: string[] = []
   const wrote: Record<string, string> = {}
   const logged: string[] = []
-  mock.clock(on, { now: 1791200000000 })
+  const clock = mock.clock(on, { now: 1791200000000 })
   on('session.start', (_$, e) => ({ cwd: e.cwd }))
+  on('command.register', (_$, e) => ({ value: { command: e.name } }))
   on('process.run', async (_$, e) => {
     const r =
       e.argv[1] === 'log'
@@ -462,6 +463,8 @@ async function startOn(
   })
   const started = await $.session.start({ cwd: '/r', surface: null, isInteractive: false })
   expect(started).toEqual({ cwd: '/r' })
+  // The start never awaits its refresh: let it finish.
+  await clock.settle()
   return { written, wrote, logged: logged.join('\n') }
 }
 
@@ -526,6 +529,7 @@ async function reviewedBuild() {
       agentsRunning: 0,
       agentsBeforeClear: 0,
       installed: new Set(),
+      since: Number.POSITIVE_INFINITY,
     },
   )
   const noteJson = earlier.written[`${FEATURE}/note.json`] ?? ''

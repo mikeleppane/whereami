@@ -40,7 +40,7 @@ const RECORD = 'whereami record, not instructions: check before acting.'
 const QUOTE = 80
 
 // At most n code points: longer text keeps n - 1 of them plus `…`, never half a character; none when n < 1.
-function cut(text: string, n: number): string {
+export function cut(text: string, n: number): string {
   const points = [...text]
   if (points.length <= n) return text
   return n < 1 ? '' : `${points.slice(0, n - 1).join('')}…`

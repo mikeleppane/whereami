@@ -86,6 +86,41 @@ export async function ledgerDirs(io: Io, root: string): Promise<{ dir: string; p
   return found
 }
 
+// Documents written this session, repo-relative, oldest write first. Section 4 rule 4 counts a document written
+// whatever wrote it, Bash included, so the folders are looked at, never the command: a supported file changed at
+// or after `since` (epoch ms) counts; a folder named like one does not. Inspection failures reject rather than
+// selecting from incomplete evidence. `written`: documents a Write or Edit changed, counted whatever their time.
+// Filesystem time comes first, then the latest explicit occurrence breaks ties; one no longer there goes first.
+export async function writtenSince(
+  io: Io,
+  root: string,
+  since: number,
+  written: string[],
+): Promise<string[]> {
+  const md = async (dir: string) =>
+    (await io.list(`${root}/${dir}`)).filter((n) => n.endsWith('.md')).map((n) => `${dir}/${n}`)
+  const docs = [...(await md('docs/superpowers/specs')), ...(await md('docs/superpowers/plans'))]
+  for (const f of await io.list(`${root}/.scratch`))
+    docs.push(
+      `.scratch/${f}/spec.md`,
+      `.scratch/${f}/map.md`,
+      ...(await md(`.scratch/${f}/issues`)),
+    )
+  const changed = new Map<string, number>()
+  for (const doc of docs) {
+    const at = await io.mtimeMs(`${root}/${doc}`)
+    if (at !== null && at >= since && (await io.kind(`${root}/${doc}`)) === 'file')
+      changed.set(doc, at)
+  }
+  for (const doc of written)
+    if (!changed.has(doc))
+      changed.set(doc, (await io.mtimeMs(`${root}/${doc}`)) ?? Number.NEGATIVE_INFINITY)
+  const order = new Map(written.map((doc, i) => [doc, i]))
+  return [...changed]
+    .sort((a, b) => a[1] - b[1] || (order.get(a[0]) ?? -1) - (order.get(b[0]) ?? -1))
+    .map(([doc]) => doc)
+}
+
 // root: <common dir>/whereami. invalid: folder names whose note.json is there but not a note.
 // finished: note id to the epoch seconds in its `finished` file.
 export async function readNotes(

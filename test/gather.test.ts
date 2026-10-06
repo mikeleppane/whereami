@@ -11,6 +11,7 @@ import {
   readTickets,
   relatedKeys,
   taskNumbers,
+  writtenSince,
 } from '../src/gather'
 import { parseTicket, readMatt } from '../src/matt'
 import { serializeNote } from '../src/notes'
@@ -396,4 +397,24 @@ test('mergedState: ancestor merged, live branch not merged, deleted branch unkno
   // A cut answer is none, whatever its exit code says.
   expect(await state({ code: 0, out: '', truncated: true }, exit(1))).toBe('unknown')
   expect(await state(exit(1), { code: 0, out: '', truncated: true })).toBe('unknown')
+})
+
+test('writtenSince rejects failed inspections but omits confirmed missing documents', async () => {
+  const files: Record<string, string> = {
+    '/r/.scratch/a/spec.md': '# A\n',
+    '/r/.scratch/b/spec.md': '# B\n',
+  }
+  const io = fakeIo(files, () => null, 5)
+  for (const operation of ['kind', 'mtimeMs'] as const) {
+    const failed = {
+      ...io,
+      [operation]: async (path: string) => {
+        if (path === '/r/.scratch/b/spec.md') throw new Error(`${operation}: denied`)
+        return io[operation](path)
+      },
+    }
+    await expect(writtenSince(failed, '/r', 5, [])).rejects.toThrow(`${operation}: denied`)
+  }
+  delete files['/r/.scratch/b/spec.md']
+  expect(await writtenSince(io, '/r', 5, [])).toEqual(['.scratch/a/spec.md'])
 })

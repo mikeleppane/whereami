@@ -5,64 +5,23 @@ import { refresh, type SessionFacts } from '../src/refresh'
 import type { View } from '../src/text'
 import type { GitResult, Note } from '../src/types'
 import { fakeIo } from './fake-io'
+import {
+  complete,
+  git,
+  HEAD,
+  LEDGER,
+  ledger,
+  PLAN,
+  type Repo,
+  repo,
+  spWorld,
+} from './fixtures/repo'
 import { THREE_TASK_PLAN } from './fixtures/sp'
 
-const HEAD = 'c'.repeat(40)
 const TIP = 'd'.repeat(40)
 const START = 'e'.repeat(40)
 const W = '/r/.git/whereami'
-const PLAN = 'docs/superpowers/plans/2026-10-05-auth.md'
 const SPEC = 'docs/superpowers/specs/2026-10-05-auth-design.md'
-const LEDGER = '/r/.superpowers/sdd/auth/progress.md'
-const NO: GitResult = { code: 1, out: '', truncated: false }
-
-// The git state a test moves between refreshes. branch null: detached HEAD.
-type Repo = {
-  branch: string | null
-  log: string
-  merged: boolean
-  deleted: boolean
-  since: string
-}
-
-const repo = (fields: Partial<Repo> = {}): Repo => ({
-  branch: 'feat/auth',
-  log: '',
-  merged: false,
-  deleted: false,
-  since: '',
-  ...fields,
-})
-
-// git as repoFacts, gather and the readers ask it, answered from `r`; any other call fails (code 128).
-const git =
-  (r: Repo) =>
-  (args: string[]): GitResult | string | null => {
-    const a = args.join(' ')
-    if (a === 'rev-parse --path-format=absolute --show-toplevel --git-common-dir')
-      return '/r\n/r/.git\n'
-    if (a === 'symbolic-ref --quiet --short HEAD') return r.branch === null ? NO : `${r.branch}\n`
-    if (a === 'symbolic-ref --quiet HEAD')
-      return r.branch === null ? NO : `refs/heads/${r.branch}\n`
-    if (a === 'rev-parse --verify --quiet HEAD') return `${HEAD}\n`
-    if (a.startsWith('symbolic-ref') && a.endsWith('refs/remotes/origin/HEAD')) return NO
-    if (a === 'show-ref --verify --quiet refs/heads/main') return ''
-    if (a.startsWith('show-ref --verify --quiet refs/heads/')) return r.deleted ? NO : ''
-    if (a === 'worktree list --porcelain -z')
-      return 'worktree /r\0HEAD x\0branch refs/heads/main\0\0'
-    if (a.startsWith('log --name-only')) return r.log
-    if (a.startsWith('log --format=%H')) return r.since
-    if (args[0] === 'for-each-ref')
-      return r.deleted
-        ? ''
-        : args
-            .slice(2)
-            .map((ref) => `1\t${ref}\n`)
-            .join('')
-    if (args[0] === 'ls-tree') return ''
-    if (a.startsWith('merge-base --is-ancestor')) return r.merged ? '' : NO
-    return null
-  }
 
 // git(r), except the calls `differ` answers; undefined leaves a call to git(r).
 const gitBut =
@@ -78,17 +37,9 @@ const session = (fields: Partial<SessionFacts> = {}): SessionFacts => ({
   agentsRunning: 0,
   agentsBeforeClear: 0,
   installed: new Set(['superpowers:finishing-a-development-branch']),
+  // Nothing on disk counts as written this session unless a test says when it started.
+  since: Number.POSITIVE_INFINITY,
   ...fields,
-})
-
-const ledger = (...lines: string[]) => [`# SDD ledger — plan: ${PLAN}`, ...lines].join('\n')
-const complete = (n: number) => `Task ${n}: complete (commits a..b, review clean)`
-
-// A Superpowers build of `auth` on feat/auth: the plan, its ledger folder and the ledger.
-const spWorld = (...lines: string[]): Record<string, string> => ({
-  [`/r/${PLAN}`]: THREE_TASK_PLAN,
-  '/r/.superpowers/sdd/auth/plan-path': `${PLAN}\n`,
-  [LEDGER]: ledger(...lines),
 })
 
 const note = (fields: Partial<Note>): Note => ({
@@ -261,7 +212,10 @@ test('Matt manual loop on main: an observed implement with commits after it stay
       },
     ]
     const installed = new Set(['mattpocock-skills:implement'])
-    for (const facts of [session({ observed, installed }), session({ installed })]) {
+    for (const facts of [
+      session({ observed, skillDocs: [doc], installed }),
+      session({ installed }),
+    ]) {
       const v = feature((await refresh(io, facts)).view)
       const first = v.matt?.items.find((i) => i.key === '01')
       expect(first?.state).toBe('complete')
@@ -371,6 +325,24 @@ test('a current ledger selects its plan and referenced spec together ahead of hi
   }
 })
 
+test('equal write times use the latest explicit occurrence to select the replacement plan', async () => {
+  const OLD = 'docs/superpowers/plans/2026-10-01-auth.md'
+  // Listing order is replacement, old; the last observed write is replacement.
+  const files = {
+    [`/r/${PLAN}`]: `**Spec:** ${SPEC}\n\n### Task 1: Replace the old build\n`,
+    [`/r/${OLD}`]: THREE_TASK_PLAN,
+  }
+  const io = fakeIo(files, git(repo()), 5)
+  const installed = new Set(['superpowers:subagent-driven-development'])
+  const v = feature(
+    (await refresh(io, session({ writtenDocs: [PLAN, OLD, PLAN], since: 5, installed }))).view,
+  )
+  expect(v.docs).toEqual({ plan: PLAN, spec: SPEC })
+  expect(v.headline.count).toEqual([0, 1])
+  expect(v.next?.command).toBe(`/superpowers:subagent-driven-development ${PLAN}`)
+  expect((await readNotes(io, W)).notes[0]?.docs.plan).toBe(PLAN)
+})
+
 test('the newest explicit plan start selects the replacement across refreshes', async () => {
   const OLD = 'docs/superpowers/plans/2026-10-01-auth.md'
   const older = {
@@ -394,14 +366,20 @@ test('the newest explicit plan start selects the replacement across refreshes', 
     }
     const io = fakeIo(files, git(repo({ log: `\0${TIP}\told plan\0\n${OLD}\0` })))
     const installed = new Set(['superpowers:subagent-driven-development'])
-    expect(feature((await refresh(io, session({ observed: [older] }))).view).headline.phase).toBe(
-      'review',
-    )
+    expect(
+      feature((await refresh(io, session({ observed: [older], skillDocs: [OLD] }))).view).headline
+        .phase,
+    ).toBe('review')
     expect((await readNotes(io, W)).notes[0]?.last?.allComplete).toBe(true)
     delete files[LEDGER]
     delete files['/r/.superpowers/sdd/auth/plan-path']
     for (const facts of [
-      session({ observed, skillDocs: [OLD], writtenDocs: [OLD], installed }),
+      session({
+        observed,
+        skillDocs: [OLD, ...observed.map((o) => o.doc)],
+        writtenDocs: [OLD],
+        installed,
+      }),
       session({ installed }),
     ]) {
       const v = feature((await refresh(io, facts)).view)
@@ -624,7 +602,8 @@ test('an observed implement whose commits git cannot count is unknown, never 0 c
   const io = fakeIo(files, (args) =>
     !counted && args.join(' ').startsWith('log --format=%H') ? null : answer(args),
   )
-  const seen = feature((await refresh(io, session({ observed }))).view).matt?.items[0]
+  const skillDocs = observed.map((o) => o.doc)
+  const seen = feature((await refresh(io, session({ observed, skillDocs }))).view).matt?.items[0]
   expect(seen?.state).toBe('complete')
   counted = false
   const v = feature((await refresh(io, session())).view)
