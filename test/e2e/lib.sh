@@ -131,9 +131,19 @@ session() {
 	poll 60 'screen | grep -q "^❯"' || fail 'no prompt within 60 s'
 }
 
-# send TEXT: types TEXT and Enter.
+# boxed: the prompt box's line, "❯" and a no-break space before its text: a ❯ line right under a rule, not an
+# earlier prompt in the history; empty while no box is drawn (a turn running, a dialog open).
+boxed() {
+	screen | awk '/^─/ { r = NR; next } /^❯/ && NR == r + 1 { b = $0 } END { sub(/[[:space:]]+$/, "", b); print b }'
+}
+
+# send TEXT: types TEXT and, once the box shows it, Enter: an Enter that arrives while Claude Code is still taking
+# in the text is dropped (seen on slow CI runners).
 send() {
-	tm send-keys -t way -l "$1" && tm send-keys -t way Enter
+	s_text=$1
+	tm send-keys -t way -l "$s_text" || return 1
+	poll 10 'case $(boxed) in "❯"*"$s_text") ;; *) false ;; esac'
+	tm send-keys -t way Enter
 }
 
 # say TEXT: sends TEXT, which starts a step of the way's script, then waits until that step has no turn left. Other
@@ -146,11 +156,6 @@ say() {
 const i = JSON.parse(require("fs").readFileSync(f, "utf8")).steps.findIndex((s) => t.includes(s.match))
 console.log(i < 0 ? "[0-9]+" : i)' "$ROOT/test/e2e/ways/$NAME.json" "$1")
 	send "$1"
-	# An Enter the slash-command menu takes leaves TEXT in the box with nothing sent; press it once more.
-	if ! poll 10 '[ "$(wc -l <"$OUT/requests.jsonl")" -gt "$s_n" ]' &&
-		[ "$(screen | grep '^❯' | tail -n 1 | sed 's/ *$//')" = "❯ $1" ]; then
-		tm send-keys -t way Enter
-	fi
 	poll 60 'tail -n +$((s_n + 1)) "$OUT/requests.jsonl" | grep -Eq "\"step\":$s_step,.*\"final\":true"' ||
 		fail "no answer to: $1"
 	SAID=$s_n
