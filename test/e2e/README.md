@@ -14,6 +14,9 @@ Needs `tmux` and `node`. `tmux` sockets are refused inside the Claude Code sandb
 Each run writes `out/<run id>/<way>/`: the throwaway `home/`, `requests.jsonl`, the fake server's log and, when a
 way fails, `screen.txt` (the pane with its scrollback) and `repo/`.
 
+CI runners are slower than a workstation, and timing races show there first. To reproduce one locally, pin the run
+to one CPU: `taskset -c 0 make e2e WAYS=<way>`.
+
 ## Files
 
 - `fake-api.mjs <script.json> <dir>`: answers `POST /v1/messages` as JSON or SSE and every other path with 404 `{}`.
