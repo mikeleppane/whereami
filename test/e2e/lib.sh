@@ -146,6 +146,11 @@ say() {
 const i = JSON.parse(require("fs").readFileSync(f, "utf8")).steps.findIndex((s) => t.includes(s.match))
 console.log(i < 0 ? "[0-9]+" : i)' "$ROOT/test/e2e/ways/$NAME.json" "$1")
 	send "$1"
+	# An Enter the slash-command menu takes leaves TEXT in the box with nothing sent; press it once more.
+	if ! poll 10 '[ "$(wc -l <"$OUT/requests.jsonl")" -gt "$s_n" ]' &&
+		[ "$(screen | grep '^❯' | tail -n 1 | sed 's/ *$//')" = "❯ $1" ]; then
+		tm send-keys -t way Enter
+	fi
 	poll 60 'tail -n +$((s_n + 1)) "$OUT/requests.jsonl" | grep -Eq "\"step\":$s_step,.*\"final\":true"' ||
 		fail "no answer to: $1"
 	SAID=$s_n
