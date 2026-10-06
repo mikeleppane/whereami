@@ -499,7 +499,12 @@ export const register: Register = (on) => {
   on('session.end', async ($, e, next) => {
     const result = await next(e)
     if (e.reason !== 'clear') {
-      // What the queue holds finishes, so a summary is whole; a refresh waiting out the second is not run.
+      // What the queue holds finishes, so a summary is whole. A refresh still waiting out the second runs now,
+      // unthrottled: `claude -p` ends right after its last tool call, and the session's last change must be saved.
+      if (waiting || again) {
+        last = Number.NEGATIVE_INFINITY
+        await serial(() => (waiting || again ? run($) : Promise.resolve(true)))
+      }
       await tail
       return result
     }

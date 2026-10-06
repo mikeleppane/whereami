@@ -177,8 +177,8 @@ function memberships(input: IdentityInput): Map<DocRef, string> {
     const path = doc.kind === 'sp-plan' ? input.planSpecs[doc.path] : undefined
     return path === undefined ? null : classifyRelative(path)
   }
-  // New documents sharing a base id, or linked by a plan's `**Spec:**` line, form one group,
-  // grouped before any is named so the first document seen names it whatever the order.
+  // New documents sharing a base id, or linked by a plan's `**Spec:**` line, form one group named by its
+  // root: a plan's spec comes before the plan, so which evidence reaches a refresh first never renames it.
   const parent = new Map<string, string>()
   const group = (key: string): string => {
     const up = parent.get(key)
@@ -200,7 +200,7 @@ function memberships(input: IdentityInput): Map<DocRef, string> {
     if (spec && ownerOf(notes, doc, input.planSpecs) === null)
       parent.set(group(featureIdFor(doc)), group(featureIdFor(spec)))
   }
-  // Group to the feature id its first document created.
+  // Group root to the feature id it created.
   const created = new Map<string, string>()
   const ids = new Map<DocRef, string>()
   for (const doc of evidence) {
@@ -209,15 +209,15 @@ function memberships(input: IdentityInput): Map<DocRef, string> {
       ids.set(doc, owner)
       continue
     }
-    const base = featureIdFor(doc)
+    const root = group(featureIdFor(doc))
     const id =
-      created.get(group(base)) ??
-      uniqueId(base, [
+      created.get(root) ??
+      uniqueId(root, [
         ...notes.map((n) => n.id),
         ...(input.forgotten ?? []).flatMap((marker) => (marker === null ? [] : [marker.id])),
         ...created.values(),
       ])
-    created.set(group(base), id)
+    created.set(root, id)
     ids.set(doc, id)
   }
   return ids

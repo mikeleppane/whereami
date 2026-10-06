@@ -104,7 +104,9 @@ export function nextAction(s: FeatureState, installed: Set<string>): NextAction 
     }
   }
 
-  if (s.implementSpecAt !== undefined && s.agentsRunning === 0 && s.matt?.phase !== 'done') {
+  if (s.implementSpecAt !== undefined && s.matt?.phase !== 'done') {
+    // While its agents run they build the tickets: any suggestion would redo their work.
+    if (s.agentsRunning > 0) return null
     return {
       text: `implement-spec started at ${hhmm(s.implementSpecAt)} and nothing is running: check its integration branch before rerunning`,
     }

@@ -70,16 +70,15 @@ test('a session that ends right after it starts waits for the refresh under way,
   expect(w.written[`${W}/branches/feat%2Fauth/message`]).toContain('build 1/3')
 })
 
-test('a session that ends never waits for a refresh still waiting its turn', async ($, on) => {
+// `claude -p` ends right after its last tool call, inside the second a refresh waits out.
+test('a session that ends runs a refresh still waiting its turn at once, so its last change is saved', async ($, on) => {
   const files = spWorld(complete(1))
   const w = world(on, { files, git: git(repo()) })
   await start($, w.clock)
   files[LEDGER] = ledger(complete(1), complete(2))
   await bash($)
-  const before = refreshes(w)
   await $.session.end({ reason: 'prompt_input_exit', sessionId: 's1', resume: { id: 's1' } })
-  expect(refreshes(w)).toBe(before)
-  expect(w.written[`${W}/branches/feat%2Fauth/message`]).toContain('build 1/3')
+  expect(w.written[`${W}/branches/feat%2Fauth/message`]).toContain('build 2/3')
 })
 
 test('the band stacks above what the plugins below drew, and draws only theirs under a survey', async ($, on) => {

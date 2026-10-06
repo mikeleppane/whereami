@@ -163,12 +163,12 @@ test('a written plan joins the note owning its spec', () => {
   expect(result).toEqual({ kind: 'one', id: 'm', weak: false })
 })
 
-test('a new plan and the new Matt spec it names are one feature, named by the first', () => {
+test('a new plan and the new Matt spec it names are one feature, named by the spec', () => {
   const mattSpec = classifyDoc('.scratch/billing/spec.md', '/r')
   const rollout = plan('docs/superpowers/plans/billing-rollout.md')
-  const result = (writtenDocs: DocRef[]) =>
+  const result = (writtenDocs: DocRef[], more: Partial<IdentityInput> = {}) =>
     resolveFeature(
-      input({ writtenDocs, planSpecs: { [rollout.path]: '.scratch/billing/spec.md' } }),
+      input({ writtenDocs, planSpecs: { [rollout.path]: '.scratch/billing/spec.md' }, ...more }),
     )
   expect(mattSpec && result([mattSpec, rollout])).toEqual({
     kind: 'one',
@@ -176,12 +176,11 @@ test('a new plan and the new Matt spec it names are one feature, named by the fi
     weak: false,
     create: mattSpec,
   })
-  expect(mattSpec && result([rollout, mattSpec])).toEqual({
-    kind: 'one',
-    id: 'billing-rollout',
-    weak: false,
-    create: rollout,
-  })
+  // The plan reaches the refresh first: a ledger and skill start landed before its committed spec was read.
+  expect(
+    mattSpec &&
+      result([], { ledgerPlans: [rollout], skillDocs: [rollout], commitDocs: [mattSpec, rollout] }),
+  ).toEqual({ kind: 'one', id: 'billing', weak: false, create: rollout })
   // Both ids already exist when the plan that links them arrives.
   const rolloutSpec = spec('docs/superpowers/specs/billing-rollout-design.md')
   expect(mattSpec && result([mattSpec, rolloutSpec, rollout])).toEqual({

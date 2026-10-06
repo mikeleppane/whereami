@@ -89,19 +89,24 @@ test('task commits without a ledger block rebuilding the Superpowers plan', () =
   )
 })
 
-test('an idle implement-spec run asks for its integration branch before rerunning', () => {
-  const action = nextAction(
-    feature({
-      matt: mattResult('build'),
-      implementSpecAt: '2026-10-05T09:02:00',
-    }),
-    installed('mattpocock-skills:implement'),
-  )
+test('an implement-spec run drafts no ticket: idle it asks for its integration branch, running it is left alone', () => {
+  const ready = item('01', 'open', { path: '.scratch/demo/issues/01-store.md' })
+  const run = (agentsRunning: number) =>
+    nextAction(
+      feature({
+        matt: mattResult('build', { items: [ready], frontier: ['01'] }),
+        implementSpecAt: '2026-10-05T09:02:00',
+        agentsRunning,
+      }),
+      installed('mattpocock-skills:implement', 'mattpocock-skills:ask-matt'),
+    )
 
-  expect(action?.command).toBe(undefined)
-  expect(action?.text).toContain(
+  expect(run(0)?.command).toBe(undefined)
+  expect(run(0)?.text).toContain(
     'implement-spec started at 09:02 and nothing is running: check its integration branch before rerunning',
   )
+  // Its agents are building the frontier: drafting 01 would redo their work.
+  expect(run(1)).toBe(null)
 })
 
 test('a finished Superpowers feature without a ledger is not offered another build', () => {
