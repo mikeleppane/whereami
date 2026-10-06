@@ -1,0 +1,153 @@
+import type { Headline } from './next'
+import type { SpResult } from './superpowers'
+import type { Docs, LastSeen, Note, Observed, TaskSnap } from './types'
+
+export function snapshot(
+  sp: SpResult,
+  headline: Headline,
+  source: string | undefined,
+  seen: string,
+  sourceRoot?: string,
+): LastSeen {
+  const tasks: Record<string, TaskSnap> = {}
+  for (const item of sp.items) {
+    const key = item.key.replace(/^Task /, '')
+    // The reader keeps status evidence in ledger order: the last entry is the status that won.
+    const evidence = item.evidence[item.evidence.length - 1]?.text ?? ''
+    tasks[key] = {
+      state: item.state,
+      ...(item.reviewed === undefined ? {} : { reviewed: item.reviewed }),
+      ...(item.fixRound === undefined ? {} : { fixRound: [item.fixRound[0], item.fixRound[1]] }),
+      ...(item.parked === undefined ? {} : { parked: item.parked }),
+      evidence,
+    }
+  }
+
+  return {
+    phase: headline.phase,
+    tasks,
+    allComplete: sp.allComplete,
+    ledgerSeen: sp.ledgerSeen,
+    ...(sp.docs.plan === undefined ? {} : { plan: sp.docs.plan }),
+    ...(source === undefined ? {} : { source }),
+    ...(sourceRoot === undefined ? {} : { sourceRoot }),
+    seen,
+  }
+}
+
+export type RememberInput = {
+  prev: Note | null
+  prevInvalid: boolean
+  id: string
+  branch: string | null
+  head: string | null
+  isDefault: boolean
+  hasOwnCommits: boolean
+  docs: Docs
+  planHeadings: string[] | null
+  sp: SpResult | null
+  headline: Headline
+  sessionObserved: Observed[]
+  // Absolute ledger source, not relative to the worktree doing a later refresh.
+  source?: string
+  sourceRoot?: string
+  now: Date
+}
+
+export type Remembered = { note: Note; finishedAt: number | null; notices: string[] }
+
+function sameHeadings(left: string[], right: string[]): boolean {
+  return left.length === right.length && left.every((heading, index) => heading === right[index])
+}
+
+function mergeObserved(previous: Observed[], current: Observed[]): Observed[] {
+  const merged: Observed[] = []
+  for (const observation of [...previous, ...current]) {
+    if (
+      merged.some(
+        (entry) =>
+          entry.skill === observation.skill &&
+          entry.doc === observation.doc &&
+          entry.at === observation.at,
+      )
+    ) {
+      continue
+    }
+    merged.push(observation)
+  }
+  return merged
+}
+
+export function remember(input: RememberInput, prevFinishedAt: number | null): Remembered {
+  const previous = input.prev
+  const note: Note = previous
+    ? { ...previous, branches: [...previous.branches] }
+    : {
+        version: 1,
+        id: input.id,
+        branches: [],
+        unlinked: [],
+        tips: {},
+        docs: {},
+        planTasks: [],
+        observed: [],
+        last: null,
+      }
+  const notices: string[] = []
+  if (input.prevInvalid) {
+    notices.push("whereami's earlier record was unreadable; rebuilt from files and git")
+  }
+
+  const canAddBranch =
+    input.branch !== null &&
+    (!input.isDefault || !note.branches.some((branch) => branch !== input.branch))
+  if (input.branch !== null && input.isDefault && !canAddBranch) {
+    note.branches = note.branches.filter((branch) => branch !== input.branch)
+  } else if (canAddBranch && input.branch !== null) {
+    if (!note.branches.includes(input.branch)) note.branches.push(input.branch)
+    note.unlinked = note.unlinked.filter((branch) => branch !== input.branch)
+  }
+  if (input.branch !== null && input.hasOwnCommits && input.head !== null) {
+    note.tips = { ...note.tips, [input.branch]: input.head }
+  }
+
+  const planChanged =
+    note.docs.plan !== undefined &&
+    input.docs.plan !== undefined &&
+    note.docs.plan !== input.docs.plan
+  if (planChanged) {
+    note.last = null
+    note.planTasks = []
+  }
+  note.docs = { ...note.docs, ...input.docs }
+  note.observed = mergeObserved(previous?.observed ?? [], input.sessionObserved)
+
+  const headingsFrozen = note.planTasks.length > 0
+  if (input.planHeadings !== null) {
+    if (headingsFrozen) {
+      if (!sameHeadings(note.planTasks, input.planHeadings)) {
+        notices.push('plan edited since the build started')
+      }
+    } else if (input.sp?.ledgerSeen) {
+      note.planTasks = [...input.planHeadings]
+    }
+  }
+
+  const seen = input.now.toISOString()
+  if (input.sp?.currentLedger) {
+    note.last = snapshot(input.sp, input.headline, input.source, seen, input.sourceRoot)
+  } else if (note.last !== null) {
+    note.last = { ...note.last, phase: input.headline.phase }
+  }
+
+  // Spec section 3: set at done or merged, empty otherwise. Unknown is no evidence of either: it keeps the time.
+  const { phase } = input.headline
+  const kept = planChanged ? null : prevFinishedAt
+  const finishedAt =
+    phase === 'done' || phase === 'merged'
+      ? (kept ?? Math.floor(input.now.getTime() / 1000))
+      : phase === 'unknown'
+        ? kept
+        : null
+  return { note, finishedAt, notices }
+}

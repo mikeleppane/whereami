@@ -1,0 +1,130 @@
+{
+  "steps": [
+    {
+      "match": "where are we, startup",
+      "turns": [
+        [
+          {
+            "type": "tool_use",
+            "name": "Bash",
+            "input": {
+              "command": "git status --short",
+              "description": "Show the working tree"
+            }
+          }
+        ],
+        [
+          {
+            "type": "text",
+            "text": "Task 1 is done."
+          }
+        ]
+      ]
+    },
+    {
+      "match": "where are we, resume",
+      "turns": [
+        [
+          {
+            "type": "tool_use",
+            "name": "Bash",
+            "input": {
+              "command": "git status --short",
+              "description": "Show the working tree"
+            }
+          }
+        ],
+        [
+          {
+            "type": "text",
+            "text": "Task 1 is done."
+          }
+        ]
+      ]
+    },
+    {
+      "match": "where are we, clear",
+      "turns": [
+        [
+          {
+            "type": "tool_use",
+            "name": "Bash",
+            "input": {
+              "command": "git status --short",
+              "description": "Show the working tree"
+            }
+          }
+        ],
+        [
+          {
+            "type": "text",
+            "text": "Task 1 is done."
+          }
+        ]
+      ]
+    },
+    {
+      "match": "where are we, compact",
+      "turns": [
+        [
+          {
+            "type": "tool_use",
+            "name": "Bash",
+            "input": {
+              "command": "git status --short",
+              "description": "Show the working tree"
+            }
+          }
+        ],
+        [
+          {
+            "type": "text",
+            "text": "Task 1 is done."
+          }
+        ]
+      ]
+    },
+    {
+      "match": "start task 3",
+      "turns": [
+        [
+          {
+            "type": "tool_use",
+            "name": "Bash",
+            "input": {
+              "command": "printf \"Task 3: fix round 1/3\\n\" >>.superpowers/sdd/x/progress.md",
+              "description": "Record Task 3 in the ledger"
+            }
+          }
+        ],
+        [
+          {
+            "type": "text",
+            "text": "Task 3 is under way."
+          }
+        ]
+      ]
+    },
+    {
+      "match": "where are we, fork",
+      "turns": [
+        [
+          {
+            "type": "tool_use",
+            "name": "Bash",
+            "input": {
+              "command": "git status --short",
+              "description": "Show the working tree"
+            }
+          }
+        ],
+        [
+          {
+            "type": "text",
+            "text": "Task 1 is done."
+          }
+        ]
+      ]
+    }
+  ]
+}

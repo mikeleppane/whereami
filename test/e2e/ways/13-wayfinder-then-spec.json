@@ -1,0 +1,54 @@
+{
+  "steps": [
+    {
+      "match": ".scratch/demo/map.md",
+      "turns": [
+        [
+          {
+            "type": "text",
+            "text": "Decision 02 is ready."
+          }
+        ]
+      ]
+    },
+    {
+      "match": "write the spec and its tickets",
+      "turns": [
+        [
+          {
+            "type": "tool_use",
+            "name": "Write",
+            "input": {
+              "file_path": ".scratch/demo/spec.md",
+              "content": "# Demo\n"
+            }
+          }
+        ],
+        [
+          {
+            "type": "tool_use",
+            "name": "Write",
+            "input": {
+              "file_path": ".scratch/demo/issues/04-store.md",
+              "content": "# Store\n\nStatus: ready-for-agent\n"
+            }
+          },
+          {
+            "type": "tool_use",
+            "name": "Write",
+            "input": {
+              "file_path": ".scratch/demo/issues/05-refresh.md",
+              "content": "# Refresh\n\nStatus: ready-for-agent\nBlocked by: 04\n"
+            }
+          }
+        ],
+        [
+          {
+            "type": "text",
+            "text": "The spec and two tickets are written."
+          }
+        ]
+      ]
+    }
+  ]
+}

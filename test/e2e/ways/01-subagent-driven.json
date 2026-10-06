@@ -1,0 +1,76 @@
+{
+  "steps": [
+    {
+      "match": "build the plan",
+      "turns": [
+        [
+          {
+            "type": "tool_use",
+            "name": "Skill",
+            "input": {
+              "skill": "superpowers:subagent-driven-development",
+              "args": "docs/superpowers/plans/2026-10-05-x.md"
+            }
+          }
+        ],
+        [
+          {
+            "type": "tool_use",
+            "name": "Bash",
+            "input": {
+              "command": "mkdir -p .superpowers/sdd/x && printf 'docs/superpowers/plans/2026-10-05-x.md\\n' >.superpowers/sdd/x/plan-path && printf '# SDD ledger — plan: docs/superpowers/plans/2026-10-05-x.md\\nTask 1: complete (commits a..b, review clean)\\n' >.superpowers/sdd/x/progress.md",
+              "description": "Start the ledger with Task 1"
+            }
+          }
+        ],
+        [
+          {
+            "type": "tool_use",
+            "name": "Bash",
+            "input": {
+              "command": "printf 'Task 2: complete (commits b..c, review clean)\\n' >>.superpowers/sdd/x/progress.md",
+              "description": "Record Task 2"
+            }
+          }
+        ],
+        [{ "type": "text", "text": "Tasks 1 and 2 are done." }]
+      ]
+    },
+    {
+      "match": "finish the build",
+      "turns": [
+        [
+          {
+            "type": "tool_use",
+            "name": "Bash",
+            "input": {
+              "command": "printf 'Task 3: complete (commits c..d, review clean)\\n' >>.superpowers/sdd/x/progress.md",
+              "description": "Record Task 3"
+            }
+          }
+        ],
+        [{ "type": "text", "text": "Every task is done; the final review is next." }]
+      ]
+    },
+    {
+      "match": "remove the ledger",
+      "turns": [
+        [
+          {
+            "type": "tool_use",
+            "name": "Bash",
+            "input": {
+              "command": "rm -r .superpowers/sdd/x",
+              "description": "Remove the ledger after the final review"
+            }
+          }
+        ],
+        [{ "type": "text", "text": "The build is finished." }]
+      ]
+    },
+    {
+      "match": "where are we, startup",
+      "turns": [[{ "type": "text", "text": "The build is finished." }]]
+    }
+  ]
+}

@@ -1,0 +1,5 @@
+{
+  "name": "polite-band",
+  "version": "0.0.0",
+  "description": "A band that calls next(e) and draws one line, for whereami end-to-end tests."
+}

@@ -1,0 +1,30 @@
+{
+  "steps": [
+    {
+      "match": "execute the plan",
+      "turns": [
+        [
+          {
+            "type": "tool_use",
+            "name": "Skill",
+            "input": {
+              "skill": "superpowers:executing-plans",
+              "args": "docs/superpowers/plans/2026-10-05-x.md"
+            }
+          }
+        ],
+        [
+          {
+            "type": "tool_use",
+            "name": "Bash",
+            "input": {
+              "command": "mkdir -p .superpowers/sdd/x && printf 'docs/superpowers/plans/2026-10-05-x.md\\n' >.superpowers/sdd/x/plan-path && printf '# SDD ledger — plan: docs/superpowers/plans/2026-10-05-x.md\\nTask 1: complete (commits a..b, tests: npm test → 8/8 pass)\\n' >.superpowers/sdd/x/progress.md",
+              "description": "Record Task 1 with its tests"
+            }
+          }
+        ],
+        [{ "type": "text", "text": "Task 1 is done." }]
+      ]
+    }
+  ]
+}
