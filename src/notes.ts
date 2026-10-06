@@ -100,7 +100,9 @@ const isLastSeen = (v: unknown): v is LastSeen =>
   record(v.tasks, isTaskSnap) &&
   isBool(v.allComplete) &&
   isBool(v.ledgerSeen) &&
+  opt(v.plan, isStr) &&
   opt(v.source, isStr) &&
+  opt(v.sourceRoot, isStr) &&
   isStr(v.seen)
 
 // A note.json as written by serializeNote, or null when it is not one (spec section 3: then it is rebuilt).

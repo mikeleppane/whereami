@@ -208,7 +208,7 @@ test('a ledger snapshot keeps three task statuses after the ledger is gone', () 
   const first = remember(
     input({
       sp: result(),
-      source: LEDGER,
+      source: `/repo/${LEDGER}`,
       planHeadings: [
         'Task 1: Add token store',
         'Task 2: Refresh on 401',
@@ -228,7 +228,8 @@ test('a ledger snapshot keeps three task statuses after the ledger is gone', () 
     },
     allComplete: false,
     ledgerSeen: true,
-    source: LEDGER,
+    plan: 'docs/superpowers/plans/auth.md',
+    source: `/repo/${LEDGER}`,
     seen: SEEN,
   })
 
@@ -401,7 +402,7 @@ test('plan headings freeze at the first ledger and later edits raise a notice', 
   expect(editedAfterUnreadable.notices).toContain('plan edited since the build started')
 })
 
-test('done records the finish time once and later phases keep it', () => {
+test('done records the finish time once until a replacement plan starts', () => {
   const finished = remember(
     input({
       headline: headline('done'),
@@ -419,6 +420,17 @@ test('done records the finish time once and later phases keep it', () => {
 
   expect(finished.finishedAt).toBe(Math.floor(NOW.getTime() / 1000))
   expect(later.finishedAt).toBe(finished.finishedAt)
+
+  const replacement = remember(
+    input({
+      prev: later.note,
+      docs: { plan: 'docs/superpowers/plans/replacement.md' },
+      headline: headline('plan'),
+    }),
+    later.finishedAt,
+  )
+  expect(replacement.note.docs.plan).toBe('docs/superpowers/plans/replacement.md')
+  expect(replacement.finishedAt).toBe(null)
 })
 
 test('an invalid previous note adds the unreadable-record notice', () => {

@@ -1,6 +1,7 @@
 import { expect, mock, type TestBody, test } from 'claude-code/testing'
 import { branchCommits, buildBranch, mergedState, readTickets } from '../src/gather'
 import { parseCatFileBatch, repoFacts } from '../src/io'
+import { refresh } from '../src/refresh'
 import type { GitResult, Note } from '../src/types'
 import { fakeIo } from './fake-io'
 
@@ -357,21 +358,37 @@ test('repoFacts is null when a checkout path holds a line break', async () => {
   expect(await repoFacts(repo({ where, branch: 'main', head: SHA }))).toBe(null)
 })
 
-const SUMMARY = '/r/.git/whereami/branches/main'
+const SUMMARY = '/r/.git/whereami/branches/feat%2Fa'
 const SPEC = '/r/docs/spec.md'
+// feat/a's one commit adds a spec, so the session's refresh has a feature to write.
+const SPEC_COMMIT = `\0${SHA}\tspec\0\ndocs/superpowers/specs/2026-10-05-demo-design.md\0`
 
-// A session starting in /r on main, on a case-insensitive disk holding `files`, `dirs` and `links` (each
+// A session starting in /r on feat/a, on a case-insensitive disk holding `files`, `dirs` and `links` (each
 // path to the one it leads to), each spelled as on disk and reached by any spelling. Answers what was
 // written and logged.
 async function startOn(
   $: Parameters<TestBody>[0],
   on: Parameters<TestBody>[1],
-  disk: { files: string[]; dirs: string[]; links?: Record<string, string> },
+  disk: {
+    files: string[]
+    dirs: string[]
+    links?: Record<string, string>
+    // Files with their text; unstat: files there whose stat is denied.
+    text?: Record<string, string>
+    unstat?: string[]
+    unread?: string[]
+    unlist?: string[]
+  },
   deny = (_path: string) => false,
 ) {
+  const text = disk.text ?? {}
   const nodes = [
     ...disk.dirs.map((path) => ({ path, kind: 'dir' as const, to: undefined })),
-    ...disk.files.map((path) => ({ path, kind: 'file' as const, to: undefined })),
+    ...[...disk.files, ...Object.keys(text)].map((path) => ({
+      path,
+      kind: 'file' as const,
+      to: undefined,
+    })),
     ...Object.entries(disk.links ?? {}).map(([path, to]) => ({ path, kind: 'other' as const, to })),
   ]
   const find = (path: string) => nodes.find((n) => n.path.toLowerCase() === path.toLowerCase())
@@ -387,18 +404,23 @@ async function startOn(
     return node === undefined ? null : { at, node }
   }
   const real = (path: string) => walk(path)?.at ?? null
-  const git = repo({ branch: 'main', head: SHA })
+  const git = repo({ branch: 'feat/a', head: SHA, heads: ['main', 'feat/a'] })
   const written: string[] = []
+  const wrote: Record<string, string> = {}
   const logged: string[] = []
   mock.clock(on, { now: 1791200000000 })
   on('session.start', (_$, e) => ({ cwd: e.cwd }))
   on('process.run', async (_$, e) => {
-    const r = await git.git(e.argv.slice(1))
+    const r =
+      e.argv[1] === 'log'
+        ? { code: 0, out: SPEC_COMMIT, truncated: false }
+        : await git.git(e.argv.slice(1))
     const value = { exitCode: r.code, stdout: r.out, stderr: '' }
     return { value: { ...value, isStdoutTruncated: false, isStderrTruncated: false } }
   })
   on('fs.exists', (_$, e) => ({ value: real(e.path) !== null }))
   on('fs.stat', (_$, e) => {
+    if (disk.unstat?.includes(e.path)) return { deny: 'EACCES' }
     const w = walk(e.path)
     const kind = w === null ? undefined : find(w.at)?.kind
     if (w === null || kind === undefined) return { deny: 'ENOENT' }
@@ -408,7 +430,9 @@ async function startOn(
     }
   })
   on('fs.list', (_$, e) => {
+    if (disk.unlist?.includes(e.path)) return { deny: 'EACCES' }
     const dir = real(e.path)?.toLowerCase()
+    if (dir === undefined) return { deny: 'ENOENT' }
     const value = nodes
       .filter((n) => n.path.slice(0, n.path.lastIndexOf('/')).toLowerCase() === dir)
       .map((n) => ({
@@ -420,9 +444,16 @@ async function startOn(
       }))
     return { value }
   })
+  on('fs.read', (_$, e) => {
+    if (disk.unread?.includes(e.path)) return { deny: 'EACCES' }
+    const at = real(e.path)
+    const found = Object.entries(text).find(([path]) => real(path) === at)
+    return found === undefined ? { deny: 'ENOENT' } : { value: found[1] }
+  })
   on('fs.write', (_$, e) => {
     if (deny(e.path)) return { deny: 'read-only' }
     written.push(e.path)
+    wrote[e.path] = e.text
     return { value: undefined }
   })
   on('ui.log', (_$, e) => {
@@ -431,7 +462,7 @@ async function startOn(
   })
   const started = await $.session.start({ cwd: '/r', surface: null, isInteractive: false })
   expect(started).toEqual({ cwd: '/r' })
-  return { written, logged: logged.join('\n') }
+  return { written, wrote, logged: logged.join('\n') }
 }
 
 const REPO = ['/r', '/r/.git', '/r/docs']
@@ -441,7 +472,10 @@ test('a refused write leaves the old summary undated and logs why', async ($, on
   const files = [`${SUMMARY}/seen`, `${SUMMARY}/message`]
   const dirs = [...REPO, '/r/.git/whereami', '/r/.git/whereami/branches', SUMMARY]
   const { written, logged } = await startOn($, on, { files, dirs }, (p) => p.endsWith('/message'))
-  expect(written).toEqual([`${SUMMARY}/feature`, `${SUMMARY}/name`])
+  expect(written.filter((p) => p.startsWith(SUMMARY))).toEqual([
+    `${SUMMARY}/feature`,
+    `${SUMMARY}/name`,
+  ])
   expect(logged).toContain(`${SUMMARY}/message`)
 })
 
@@ -450,16 +484,96 @@ test('a write never goes through a link that differs from its path only by case'
   const dirs = [...REPO, '/r/.git/whereami', '/r/.git/whereami/branches', SUMMARY]
   const links = { [`${SUMMARY}/MESSAGE`]: SPEC }
   const { written, logged } = await startOn($, on, { files: [SPEC], dirs, links })
-  expect(written).toEqual([`${SUMMARY}/feature`, `${SUMMARY}/name`])
+  expect(written.filter((p) => p.startsWith(SUMMARY))).toEqual([
+    `${SUMMARY}/feature`,
+    `${SUMMARY}/name`,
+  ])
   expect(logged).toContain(`${SUMMARY}/message: Error: not a plain file`)
 })
 
 test('a write never lands through a whereami folder linked by another case', async ($, on) => {
-  // WHEREAMI links to /r/docs: every summary file would land beside the spec, so none is written.
+  // WHEREAMI links to /r/docs: every file would land beside the spec, so none is written.
   const links = { '/r/.git/WHEREAMI': '/r/docs' }
   const { written, logged } = await startOn($, on, { files: [SPEC], dirs: REPO, links })
   expect(written).toEqual([])
   expect(logged).toContain(
-    `${SUMMARY}/feature: Error: lands outside whereami/: /r/docs/branches/main`,
+    '/r/.git/whereami/features/demo/note.json: Error: lands outside whereami/: /r/docs/features/demo',
   )
+})
+
+const DEMO_PLAN = 'docs/superpowers/plans/2026-10-05-demo.md'
+const SDD = '/r/.superpowers/sdd/demo'
+const FEATURE = '/r/.git/whereami/features/demo'
+const PROGRESS = `${SDD}/progress.md`
+
+// feat/a's demo build of one task, its ledger complete, as an earlier session left it: in review, the
+// all-complete snapshot saved in the note. The disk for startOn.
+async function reviewedBuild() {
+  const world: Record<string, string> = {
+    [`/r/${DEMO_PLAN}`]:
+      '**Spec:** `docs/superpowers/specs/2026-10-05-demo-design.md`\n### Task 1: One\n',
+    [`${SDD}/plan-path`]: `${DEMO_PLAN}\n`,
+    [PROGRESS]: `# SDD ledger — plan: ${DEMO_PLAN}\nTask 1: complete (commits a..b, review clean)\n`,
+  }
+  const earlier = repo({ branch: 'feat/a', head: SHA, heads: ['main', 'feat/a'] }, { ...world })
+  const log = { code: 0, out: SPEC_COMMIT, truncated: false }
+  await refresh(
+    { ...earlier, git: async (a) => (a[0] === 'log' ? log : earlier.git(a)) },
+    {
+      observed: [],
+      skillDocs: [],
+      writtenDocs: [],
+      agentsRunning: 0,
+      agentsBeforeClear: 0,
+      installed: new Set(),
+    },
+  )
+  const noteJson = earlier.written[`${FEATURE}/note.json`] ?? ''
+  expect(JSON.parse(noteJson).last.allComplete).toBe(true)
+  const dirs = [
+    ...REPO,
+    ...['/r/docs/superpowers', '/r/docs/superpowers/plans', '/r/.superpowers', SDD],
+    ...['/r/.superpowers/sdd', '/r/.git/whereami', '/r/.git/whereami/features', FEATURE],
+  ]
+  const text: Record<string, string> = { ...world, [`${FEATURE}/note.json`]: noteJson }
+  return { files: [], dirs, text }
+}
+
+test('a ledger still there whose stat is denied is unreadable: the snapshot stays, nothing finishes', async ($, on) => {
+  const disk = { ...(await reviewedBuild()), unstat: [PROGRESS] }
+  const { wrote } = await startOn($, on, disk)
+  expect(wrote[`${FEATURE}/finished`]).toBe('')
+  expect(JSON.parse(wrote[`${FEATURE}/note.json`] ?? '').last.allComplete).toBe(true)
+})
+
+for (const [operation, path] of [
+  ['unstat', `${SDD}/plan-path`],
+  ['unread', `${SDD}/plan-path`],
+  ['unlist', '/r/.superpowers/sdd'],
+] as const) {
+  test(`ledger discovery ${operation} failure preserves the last seen build`, async ($, on) => {
+    const disk = { ...(await reviewedBuild()), [operation]: [path] }
+    const { wrote, logged } = await startOn($, on, disk)
+    expect(wrote[`${FEATURE}/finished`]).toBeUndefined()
+    expect(wrote[`${FEATURE}/note.json`]).toBeUndefined()
+    expect(logged).toContain(path)
+  })
+}
+
+test('a missing plan-path does not mean its saved progress file was removed', async ($, on) => {
+  const disk = await reviewedBuild()
+  delete disk.text[`${SDD}/plan-path`]
+  const { wrote } = await startOn($, on, disk)
+  expect(wrote[`${SUMMARY}/message`]).toContain('review')
+  expect(wrote[`${FEATURE}/finished`]).toBe('')
+  expect(JSON.parse(wrote[`${FEATURE}/note.json`] ?? '').last.allComplete).toBe(true)
+})
+
+test('a ledger confirmed deleted after a reviewed build finishes it from the snapshot', async ($, on) => {
+  const disk = await reviewedBuild()
+  delete disk.text[PROGRESS]
+  delete disk.text[`${SDD}/plan-path`]
+  disk.dirs = disk.dirs.filter((path) => !path.startsWith('/r/.superpowers/sdd'))
+  const { wrote } = await startOn($, on, disk)
+  expect(wrote[`${FEATURE}/finished`]).toMatch(/^\d+\n$/)
 })

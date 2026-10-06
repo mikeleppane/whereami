@@ -12,7 +12,8 @@ export type FeatureState = {
   agentsBeforeClear: number
   buildSkill?: string
   implementSpecAt?: string
-  taskCommitsWithoutLedger: number[]
+  // null: the branch's commits are unknown, so related task commits cannot be ruled out.
+  taskCommitsWithoutLedger: number[] | null
 }
 
 export type Headline = {
@@ -92,7 +93,12 @@ export function nextAction(s: FeatureState, installed: Set<string>): NextAction 
     return { text: `wait: ${s.agentsBeforeClear} agents from before the clear are still running` }
   }
 
-  if (s.sp?.docs.plan !== undefined && !s.sp.ledgerSeen && s.taskCommitsWithoutLedger.length > 0) {
+  if (
+    s.sp?.docs.plan !== undefined &&
+    !s.sp.ledgerSeen &&
+    s.taskCommitsWithoutLedger !== null &&
+    s.taskCommitsWithoutLedger.length > 0
+  ) {
     return {
       text: `commits for ${taskRange(s.taskCommitsWithoutLedger)} found but no progress file: check before rebuilding`,
     }
@@ -140,7 +146,7 @@ export function nextAction(s: FeatureState, installed: Set<string>): NextAction 
   if (
     s.sp?.phase === 'plan' &&
     !s.sp.ledgerSeen &&
-    s.taskCommitsWithoutLedger.length === 0 &&
+    s.taskCommitsWithoutLedger?.length === 0 &&
     s.sp.docs.plan !== undefined
   ) {
     return commandAction(

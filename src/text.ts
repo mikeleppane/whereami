@@ -1,22 +1,24 @@
 import type { Candidate } from './feature'
 import type { MattResult } from './matt'
-import type { Headline, NextAction } from './next'
+import type { FeatureState, Headline, NextAction } from './next'
 import type { SpResult } from './superpowers'
 import type { Docs, ItemStatus } from './types'
 
 export { hhmm } from './matt'
 
-// noCommits: the repo has no commits yet, named instead of the branch.
+// branch: null is a confirmed detached HEAD, undefined a branch git could not tell. noCommits: the repo has no
+// commits yet, named instead of the branch. merged: a claim apart from the phase; 'unknown' is shown as such.
 export type View =
   | {
       kind: 'feature'
       featureId: string
-      branch: string | null
+      branch: string | null | undefined
       noCommits?: boolean
       headline: Headline
       next: NextAction | null
       sp: SpResult | null
       matt: MattResult | null
+      merged: FeatureState['merged']
       docs: Docs
       agentsRunning: number
       agentsBeforeClear: number
@@ -25,7 +27,7 @@ export type View =
     }
   | {
       kind: 'choose'
-      branch: string | null
+      branch: string | null | undefined
       noCommits?: boolean
       candidates: Candidate[]
       agentsRunning: number
@@ -48,6 +50,7 @@ const quote = (text: string) => `"${cut(text, QUOTE)}"`
 
 function where(v: View): string | null {
   if (v.noCommits) return 'no commits'
+  if (v.branch === undefined) return 'branch unknown'
   return v.branch === null ? 'detached HEAD' : null
 }
 
@@ -91,6 +94,9 @@ function docsLine(docs: Docs): string[] {
   return list.length === 0 ? [] : [`docs: ${list.join(', ')}`]
 }
 
+// A squash merge leaves no trace: unknown is said, never shown as "not merged" (spec section 5).
+const mergedLine = (v: FeatureView) => (v.merged === 'unknown' ? ['merged: unknown'] : [])
+
 // Observed or related evidence on the item: its status is marked `?`, whatever the headline says.
 const weak = (i: ItemStatus) =>
   i.evidence.some((e) => e.strength === 'observed' || e.strength === 'related')
@@ -105,6 +111,7 @@ function record(v: View, first: string): string[] {
   return [
     first,
     ...(states.length === 0 ? [] : [`items: ${states.join(', ')}`]),
+    ...mergedLine(v),
     ...nextLine(v.next),
     ...docsLine(v.docs),
   ]
@@ -140,6 +147,7 @@ export function summaryText(v: View): {
     ...(parked > 0 ? [`findings: ${parked} parked for the final review`] : []),
     ...items(v).flatMap((i) => (i.findings ?? []).map((f) => `finding: ${quote(f)}`)),
     ...[...(v.sp?.notes ?? []), ...(v.matt?.notes ?? [])].map((n) => `note: ${quote(n)}`),
+    ...mergedLine(v),
     ...nextLine(v.next),
     ...docsLine(v.docs),
   ]

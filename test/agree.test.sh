@@ -42,28 +42,67 @@ session() {
 		"$ROOT/node_modules/.bin/claude" -p --plugin-dir "$ROOT" "/exit" </dev/null >/dev/null 2>&1)
 }
 
-# printed DIR WHERE: a session in DIR, then the hook prints valid JSON whose message is the skeleton's for WHERE.
+# printed DIR HEADING: a session in DIR, then the hook prints valid JSON whose message is HEADING, dated.
 printed() {
 	session "$1" || return 1
 	p_out=$(run_hook startup "$1")
 	printf '%s' "$p_out" | json_ok &&
-		printf '%s' "$p_out" | WHERE=$2 node -e '
+		printf '%s' "$p_out" | HEADING=$2 node -e '
 			const m = JSON.parse(require("fs").readFileSync(0, "utf8")).systemMessage
-			process.exit(m.startsWith(`whereami · skeleton · ${process.env.WHERE} · as of `) ? 0 : 1)'
+			process.exit(m.startsWith(`${process.env.HEADING} · as of `) ? 0 : 1)'
+}
+
+# silent DIR: a session in DIR, then the hook prints nothing and exits 0.
+silent() {
+	session "$1" || return 1
+	s_out=$(run_hook startup "$1") && [ -z "$s_out" ]
 }
 
 for b in 'feat/ä-x' '100%' 'fix/🐛'; do
 	d=$tmp/repo-$(printf '%s' "$b" | od -An -tx1 | tr -d ' \n')
 	on_branch "$d" "$b"
-	check "branch $b" 'printed "$d" "$b"'
+	check "branch $b" 'printed "$d" "whereami · demo · design"'
 done
 
 on_branch "$tmp/base" feat/wt
 git -C "$tmp/base" worktree add -q --detach "$tmp/my repo" feat/wt || die 'worktree in my repo'
-check 'detached worktree in my repo' 'printed "$tmp/my repo" "detached HEAD"'
+check 'detached worktree in my repo' 'printed "$tmp/my repo" "whereami · demo · detached HEAD · design"'
+
+# stale DIR: the hook in DIR warns that watched files changed since the summary.
+stale() {
+	case $(run_hook startup "$1") in *'files changed since'*) ;; *) return 1 ;; esac
+}
+
+# A Matt spec on its branch with no tickets: the first ticket written after the session makes the summary stale,
+# whether its issues folder is not there yet or there and empty.
+m=$tmp/matt
+I=$m/.scratch/demo/issues
+if ! { mkrepo "$m" &&
+	git -C "$m" checkout -q -b feat/m &&
+	mkdir -p "$m/.scratch/demo" &&
+	printf '# Demo\n' >"$m/.scratch/demo/spec.md" &&
+	git -C "$m" add .scratch/demo/spec.md &&
+	git -C "$m" commit -q -m spec; }; then
+	die 'matt spec'
+fi
+check 'a first ticket in a new issues folder makes the summary stale' \
+	'printed "$m" "whereami · demo · design" && ! stale "$m" &&
+		mkdir "$I" && printf "# Store\n" >"$I/01-store.md" && stale "$m"'
+rm -f "$I/01-store.md" || die 'empty issues folder'
+check 'a ticket added to an empty issues folder makes the summary stale' \
+	'printed "$m" "whereami · demo · design" && ! stale "$m" &&
+		printf "# Store\n" >"$I/01-store.md" && stale "$m"'
 
 git -c init.defaultBranch=main init -q "$tmp/empty" || die 'repo with no commits'
-check 'no commits' 'printed "$tmp/empty" "no commits"'
+# No commit holds a document, so no feature matches: nothing is shown (spec section 4 rule 7).
+check 'no commits' 'silent "$tmp/empty"'
+
+# The feature is gone (its note removed, the branch's spec commit undone): the next session leaves nothing to print.
+on_branch "$tmp/lost" feat/lost
+check 'a summary whose feature is gone is not printed after the next session' \
+	'printed "$tmp/lost" "whereami · demo · design" &&
+		rm -rf "$tmp/lost/.git/whereami/features" && git -C "$tmp/lost" reset -q --hard HEAD~1 &&
+		silent "$tmp/lost"'
 
 # The summary's message file links to the branch's spec: the writer stops there and the spec stays as it was.
 on_branch "$tmp/linked" feat/link

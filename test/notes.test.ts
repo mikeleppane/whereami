@@ -41,6 +41,13 @@ test('parseNote rejects broken JSON, another version and a field of the wrong ty
   for (const field of ['branches', 'unlinked', 'planTasks', 'observed', 'tips', 'docs']) {
     expect(parseNote(JSON.stringify({ ...NOTE, [field]: null }))).toBe(null)
   }
+  for (const field of ['plan', 'source', 'sourceRoot']) {
+    for (const value of [null, 42, []]) {
+      expect(parseNote(JSON.stringify({ ...NOTE, last: { ...NOTE.last, [field]: value } }))).toBe(
+        null,
+      )
+    }
+  }
 })
 
 test('parseNote fills fields left out', () => {

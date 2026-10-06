@@ -72,12 +72,14 @@ export async function commitsSince(io: Io, head: string | null): Promise<number 
 }
 
 // Ledger folders and the plan each names; the old flat `.superpowers/sdd/progress.md` has no plan-path.
+// Failed discovery rejects: it cannot establish that a saved ledger was removed.
 export async function ledgerDirs(io: Io, root: string): Promise<{ dir: string; plan: string }[]> {
   const sdd = `${root}/.superpowers/sdd`
   const found: { dir: string; plan: string }[] = []
   for (const name of await io.list(sdd)) {
     const dir = `${sdd}/${name}`
     const r = await io.read(`${dir}/plan-path`)
+    if (!r.ok && r.why !== 'missing') throw new Error(`not read: ${dir}/plan-path: ${r.why}`)
     const plan = r.ok ? r.text.split(/\r?\n/)[0]?.trim() : undefined
     if (plan) found.push({ dir, plan })
   }

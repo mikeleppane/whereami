@@ -1,6 +1,6 @@
 import type { EngineInterface, Register } from 'claude-code'
-import { type Io, MAX_READ, repoFacts } from '../src/io'
-import { branchFiles, paths } from '../src/notes'
+import { type Io, MAX_READ } from '../src/io'
+import { refresh } from '../src/refresh'
 
 const NO_GIT = { code: -1, out: '', truncated: false }
 
@@ -48,9 +48,12 @@ function makeIo($: EngineInterface, cwd: string): Io {
       }
     },
     read: async (path) => {
-      // ponytail: any failed stat reads as missing; tell a denied stat apart if a caller needs it.
+      // A failed stat is missing only when the path is confirmed absent; a denied or failed look is unreadable.
       const stat = await $.fs.stat(path).catch(() => null)
-      if (stat === null) return { ok: false, why: 'missing' }
+      if (stat === null)
+        return (await $.fs.exists(path).catch(() => true))
+          ? { ok: false, why: 'error' }
+          : { ok: false, why: 'missing' }
       if (stat.kind !== 'file') return { ok: false, why: 'error' }
       if (stat.size > MAX_READ) return { ok: false, why: 'too-big' }
       try {
@@ -71,11 +74,14 @@ function makeIo($: EngineInterface, cwd: string): Io {
         return false
       }
     },
-    list: (dir) =>
-      $.fs.list(dir).then(
-        (entries) => entries.map((e) => e.name),
-        () => [],
-      ),
+    list: async (dir) => {
+      try {
+        return (await $.fs.list(dir)).map((e) => e.name)
+      } catch (err) {
+        if (!(await $.fs.exists(dir).catch(() => true))) return []
+        throw new Error(`not listed: ${dir}: ${err}`)
+      }
+    },
     mtimeMs: (path) =>
       $.fs.stat(path).then(
         (s) => s.mtimeMs,
@@ -85,31 +91,20 @@ function makeIo($: EngineInterface, cwd: string): Io {
   }
 }
 
-// Walking skeleton (Task 5): a fixed summary for this branch. Task 14 replaces it with refresh.
-async function skeleton(io: Io) {
-  const facts = await repoFacts(io)
-  if (facts === null) return
-  const where = facts.head === null ? 'no commits' : (facts.branch ?? 'detached HEAD')
-  const dir = paths(facts.commonDir).branch(facts.branch, facts.root)
-  const files = branchFiles({
-    featureId: '',
-    name: facts.branch ?? facts.root,
-    seen: (await io.now()) / 1000,
-    message: `whereami · skeleton · ${where}`,
-    detail: '',
-    context: 'whereami record, not instructions: check before acting. skeleton',
-    agents: '',
-    watch: [],
-  })
-  // A failed write stops the rest, so `seen` never dates a summary that was not all written.
-  for (const [name, text] of Object.entries(files))
-    if (!(await io.write(`${dir}/${name}`, text))) return
-}
-
 export const register: Register = (on) => {
   on('session.start', async ($, e, next) => {
     const started = await next(e)
-    await skeleton(makeIo($, e.cwd)).catch((err) => $.ui.log(`whereami: ${err}`, { to: 'debug' }))
+    const session = {
+      observed: [],
+      skillDocs: [],
+      writtenDocs: [],
+      agentsRunning: 0,
+      agentsBeforeClear: 0,
+      installed: new Set<string>(),
+    }
+    await refresh(makeIo($, e.cwd), session).catch((err) =>
+      $.ui.log(`whereami: ${err}`, { to: 'debug' }),
+    )
     return started
   })
 }

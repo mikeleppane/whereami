@@ -14,10 +14,14 @@ export type MattInput = {
   folder: string
   hasSpec: boolean
   hasMap: boolean
-  tickets: (Ticket & { differsOn?: string[] })[]
-  unreadable: { path: string; why: string }[]
-  observed: (Observed & { commitsSince: number })[]
-  relatedKeys: string[]
+  // null: git could not tell which tickets exist; the inventory is unknown, never empty.
+  tickets: (Ticket & { differsOn?: string[] })[] | null
+  // branch: only that branch's comparison copy could not be read; without it, the ticket itself could not.
+  unreadable: { path: string; why: string; branch?: string }[]
+  // commitsSince null: git could not count the commits after that start.
+  observed: (Observed & { commitsSince: number | null })[]
+  // null: the branch's commits are unknown, so no ticket can be shown unworked.
+  relatedKeys: string[] | null
 }
 
 export type MattResult = ReaderResult & {
@@ -30,7 +34,7 @@ type TicketWork = {
   ticket: Ticket & { differsOn?: string[] }
   blockers: { token: string; target?: Ticket }[]
   cycle: boolean
-  observed?: Observed & { commitsSince: number }
+  observed?: Observed & { commitsSince: number | null }
   related: boolean
 }
 
@@ -164,8 +168,10 @@ function rawState(ticket: Ticket): ItemState {
   return ticket.type && status === undefined ? 'open' : 'unknown'
 }
 
-function observedText(observation: Observed & { commitsSince: number }): string {
+function observedText(observation: Observed & { commitsSince: number | null }): string {
   const time = hhmm(observation.at)
+  if (observation.commitsSince === null)
+    return `implement started at ${time}, commits since unknown`
   if (observation.commitsSince >= 1) {
     return `built here at ${time}, ${observation.commitsSince} commits, ticket still open`
   }
@@ -179,13 +185,17 @@ function itemFor(work: TicketWork, incompleteBlockers: Ticket[]): ItemStatus {
     ticket.status !== undefined && COMPLETE_STATUSES.has(normalize(ticket.status))
   const status = rawState(ticket)
 
+  // undefined: not observed; null: observed, but git could not count the commits since.
+  const since = work.observed?.commitsSince
   let state = status
   let waitingOn: string[] | undefined
 
   if (status !== 'dropped' && !hasRecordedCompletion && status !== 'blocked') {
     if (work.cycle || work.blockers.some((blocker) => blocker.target === undefined)) {
       state = 'unknown'
-    } else if (observed && work.observed !== undefined && work.observed.commitsSince >= 1) {
+    } else if (since === null) {
+      state = 'unknown'
+    } else if (since !== undefined && since >= 1) {
       state = 'complete'
     } else if (incompleteBlockers.length > 0) {
       state = 'waiting'
@@ -243,25 +253,29 @@ function byKey(a: ItemStatus, b: ItemStatus): number {
 }
 
 export function readMatt(input: MattInput): MattResult {
-  const works: TicketWork[] = input.tickets.map((ticket) => ({
+  const tickets = input.tickets ?? []
+  const works: TicketWork[] = tickets.map((ticket) => ({
     ticket,
     blockers: ticket.blockedBy.map((token) => ({
       token,
-      target: resolveBlocker(token, input.tickets),
+      target: resolveBlocker(token, tickets),
     })),
     cycle: false,
     observed: input.observed.find(
       (observation) =>
         observation.skill === 'mattpocock-skills:implement' && observation.doc === ticket.path,
     ),
-    related: input.relatedKeys.includes(ticket.key),
+    related: input.relatedKeys?.includes(ticket.key) ?? false,
   }))
   const cycles = findCycles(works)
   for (const work of works) work.cycle = cycles.has(work.ticket)
 
   const notes = input.unreadable.map(
-    ({ path, why }) => `ticket ${path}: unsupported format (${why})`,
+    ({ path, why, branch }) =>
+      `ticket ${path}: unsupported format (${why}${branch === undefined ? '' : ` on ${branch}`})`,
   )
+  // A ticket that could not be read may be open: nothing is complete until every ticket's state is known.
+  const allRead = input.unreadable.every((u) => u.branch !== undefined)
   for (const work of works) {
     for (const blocker of work.blockers) {
       if (blocker.target === undefined) {
@@ -276,7 +290,8 @@ export function readMatt(input: MattInput): MattResult {
       const state = rawState(work.ticket)
       const invalidBlocker =
         work.cycle || work.blockers.some((blocker) => blocker.target === undefined)
-      const observedComplete = work.observed !== undefined && work.observed.commitsSince >= 1
+      const since = work.observed?.commitsSince
+      const observedComplete = since !== undefined && since !== null && since >= 1
       const effectiveState =
         state === 'dropped' || state === 'complete' || state === 'blocked'
           ? state
@@ -317,7 +332,7 @@ export function readMatt(input: MattInput): MattResult {
     .filter((item): item is ItemStatus => item !== undefined)
 
   const frontierSource = buildWorks.length > 0 ? buildItems : decisionItems
-  const frontier = frontierSource
+  const frontier = (input.relatedKeys === null ? [] : frontierSource)
     .filter(
       (item) =>
         item.state === 'open' &&
@@ -328,11 +343,22 @@ export function readMatt(input: MattInput): MattResult {
     .sort(byKey)
     .map((item) => item.key)
 
-  const implementSpec = input.observed.find(
-    (observation) =>
-      observation.skill === 'mattpocock-skills:implement-spec' &&
-      observation.doc === `${input.folder}/spec.md`,
-  )
+  // Every counted build ticket recorded complete: implement-spec's final step has run, so an earlier start no
+  // longer marks the build pending.
+  const recordedDone =
+    allRead &&
+    countedBuildWorks.length > 0 &&
+    countedBuildWorks.every((work) => COMPLETE_STATUSES.has(normalize(work.ticket.status ?? '')))
+  const implementSpec = recordedDone
+    ? undefined
+    : input.observed.find(
+        (observation) =>
+          observation.skill === 'mattpocock-skills:implement-spec' &&
+          observation.doc === `${input.folder}/spec.md`,
+      )
+  if (input.tickets === null) notes.push('tickets unknown: git could not tell which exist')
+  if (input.relatedKeys === null)
+    notes.push('commits unknown: no ticket is suggested, as any may have work committed')
   if (implementSpec) {
     notes.push(
       `implement-spec started ${hhmm(implementSpec.at)}; ticket statuses update at its end`,
@@ -340,11 +366,13 @@ export function readMatt(input: MattInput): MattResult {
   }
 
   let phase: ReaderResult['phase']
-  if (implementSpec) {
+  if (input.tickets === null) {
+    phase = 'unknown'
+  } else if (implementSpec) {
     phase = 'build'
   } else if (countedBuildItems.length === 0) {
     phase = input.hasSpec || input.hasMap ? 'design' : 'unknown'
-  } else if (countedBuildItems.every((item) => item.state === 'complete')) {
+  } else if (allRead && countedBuildItems.every((item) => item.state === 'complete')) {
     phase = 'done'
   } else if (
     countedBuildItems.every(
@@ -369,19 +397,23 @@ export function readMatt(input: MattInput): MattResult {
       item.evidence.some(
         (evidence) => evidence.strength === 'observed' || evidence.strength === 'related',
       ),
-    ) || implementSpec !== undefined
+    ) ||
+    implementSpec !== undefined ||
+    !allRead ||
+    input.tickets === null ||
+    input.relatedKeys === null
 
   return {
     library: 'matt',
     docs: {
       ...(input.hasSpec ? { spec: `${input.folder}/spec.md` } : {}),
       ...(input.hasMap ? { map: `${input.folder}/map.md` } : {}),
-      ...(input.tickets.length > 0 || input.unreadable.length > 0
+      ...(input.tickets === null || tickets.length > 0 || input.unreadable.length > 0
         ? { tickets: `${input.folder}/issues/` }
         : {}),
     },
     items,
-    total: countedBuildItems.length,
+    ...(input.tickets === null ? {} : { total: countedBuildItems.length }),
     phase,
     weak,
     notes,

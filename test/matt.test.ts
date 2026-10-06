@@ -1,6 +1,6 @@
 import { expect, test } from 'claude-code/testing'
-import { hhmm, parseTicket, readMatt } from '../src/matt'
 import type { MattInput, MattResult, Ticket } from '../src/matt'
+import { hhmm, parseTicket, readMatt } from '../src/matt'
 import { BOLD_READY_TICKET, PLAIN_CLAIMED_TICKET, TITLE_BLOCKED_TICKET } from './fixtures/matt'
 
 const ticket = (value: {
@@ -448,6 +448,32 @@ test('a spec and build tickets count separately from map decisions', () => {
   expect(result.phase).toBe('plan')
 })
 
+test('implement starts git could not count leave recorded states and make only open work unknown', () => {
+  const statuses = { '01': 'done', '02': 'wontfix', '03': 'needs-info', '04': 'ready-for-agent' }
+  const tickets = Object.entries(statuses).map(([key, status]) =>
+    ticket({ key, slug: 'work', title: `Work ${key}`, status }),
+  )
+  const result = readMatt(
+    makeInput(tickets, {
+      observed: tickets.map((t) => ({
+        skill: 'mattpocock-skills:implement',
+        doc: t.path,
+        branch: 'main',
+        head: 'abc123',
+        at: '2026-10-05T14:02:00Z',
+        commitsSince: null,
+      })),
+    }),
+  )
+
+  expect(result.items.map((i) => i.state)).toEqual(['complete', 'dropped', 'blocked', 'unknown'])
+  expect(item(result, '04')?.evidence[0]?.text).toContain('commits since unknown')
+  expect(result.total).toBe(3)
+  expect(result.frontier).toEqual([])
+  expect(result.phase).toBe('build')
+  expect(result.weak).toBe(true)
+})
+
 test('an observed implement-spec start marks the reader weakly in build and explains pending ticket updates', () => {
   const result = readMatt(
     makeInput([], {
@@ -486,6 +512,19 @@ test('unreadable tickets produce one unsupported-format note per path', () => {
   expect(result.notes).toContain(
     'ticket .scratch/demo/issues/02-binary.md: unsupported format (not text)',
   )
+})
+
+test("only another branch's unreadable copy lets recorded completion stand, and names that branch", () => {
+  const done = [ticket({ key: '01', slug: 'store', title: 'Store', status: 'done' })]
+  const path = '.scratch/demo/issues/02-refresh.md'
+  const own = readMatt(makeInput(done, { unreadable: [{ path, why: 'too-big' }] }))
+  expect(own.phase).toBe('build')
+  expect(own.weak).toBe(true)
+  const other = readMatt(
+    makeInput(done, { unreadable: [{ path, why: 'too-big', branch: 'feat/old' }] }),
+  )
+  expect(other.phase).toBe('done')
+  expect(other.notes).toContain(`ticket ${path}: unsupported format (too-big on feat/old)`)
 })
 
 test('branch-specific ticket differences remain attached to the item', () => {

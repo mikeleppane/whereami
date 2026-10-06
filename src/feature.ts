@@ -112,20 +112,9 @@ export function ownerOf(
   return ownerOfPath(notes, spec, classifyRelative(spec)?.folder)
 }
 
-export function resolveFeature(input: IdentityInput): Identity {
-  const { branch, notes } = input
-  // The default branch never joins a feature: features with a branch of their own drop out there.
-  const dropped = new Set(
-    notes
-      .filter(
-        (n) =>
-          branch !== null &&
-          (n.unlinked.includes(branch) ||
-            (input.isDefault && n.branches.some((b) => b !== branch))),
-      )
-      .map((n) => n.id),
-  )
-  const candidates = new Map<string, Candidate>()
+// Each evidence document with the feature it joins: the note owning it, else the new feature of its group.
+function memberships(input: IdentityInput): Map<DocRef, string> {
+  const { notes } = input
   const specOf = (doc: DocRef) => {
     const path = doc.kind === 'sp-plan' ? input.planSpecs[doc.path] : undefined
     return path === undefined ? null : classifyRelative(path)
@@ -151,6 +140,42 @@ export function resolveFeature(input: IdentityInput): Identity {
   }
   // Group to the feature id its first document created.
   const created = new Map<string, string>()
+  const ids = new Map<DocRef, string>()
+  for (const doc of evidence) {
+    const owner = ownerOf(notes, doc, input.planSpecs)
+    if (owner !== null) {
+      ids.set(doc, owner)
+      continue
+    }
+    const base = featureIdFor(doc)
+    const id =
+      created.get(group(base)) ?? uniqueId(base, [...notes.map((n) => n.id), ...created.values()])
+    created.set(group(base), id)
+    ids.set(doc, id)
+  }
+  return ids
+}
+
+// The evidence documents belonging to feature `id`, by the same rules resolveFeature groups them with.
+export function featureDocs(input: IdentityInput, id: string): DocRef[] {
+  return [...memberships(input)].filter(([, owner]) => owner === id).map(([doc]) => doc)
+}
+
+export function resolveFeature(input: IdentityInput): Identity {
+  const { branch, notes } = input
+  // The default branch never joins a feature: features with a branch of their own drop out there.
+  const dropped = new Set(
+    notes
+      .filter(
+        (n) =>
+          branch !== null &&
+          (n.unlinked.includes(branch) ||
+            (input.isDefault && n.branches.some((b) => b !== branch))),
+      )
+      .map((n) => n.id),
+  )
+  const candidates = new Map<string, Candidate>()
+  const ids = memberships(input)
 
   const add = (id: string, why: Why, fields: Omit<Candidate, 'id' | 'why'>) => {
     const candidate = candidates.get(id) ?? { id, why: [], ...fields }
@@ -162,13 +187,9 @@ export function resolveFeature(input: IdentityInput): Identity {
     add(note.id, why, { lastChange, finished: note.finished })
   const addDoc = (doc: DocRef, why: Why) => {
     const time = input.docTimes[doc.path] ?? 0
-    const owner = ownerOf(notes, doc, input.planSpecs)
-    const note = notes.find((n) => n.id === owner)
+    const id = ids.get(doc) ?? featureIdFor(doc)
+    const note = notes.find((n) => n.id === id)
     if (note) return addNote(note, why, Math.max(note.lastChange, time))
-    const base = featureIdFor(doc)
-    const id =
-      created.get(group(base)) ?? uniqueId(base, [...notes.map((n) => n.id), ...created.values()])
-    created.set(group(base), id)
     add(id, why, { lastChange: time, finished: false, create: doc })
   }
 

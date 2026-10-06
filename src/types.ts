@@ -67,7 +67,12 @@ export type LastSeen = {
   tasks: Record<string, TaskSnap>
   allComplete: boolean
   ledgerSeen: boolean
+  // Snapshot provenance, independent of the note's current documents. Legacy notes may omit it.
+  plan?: string
+  // Absolute source in the original worktree. Legacy relative sources cannot establish removal.
   source?: string
+  // Worktree root used to normalize an absolute plan path in the source ledger's header.
+  sourceRoot?: string
   seen: string
 }
 

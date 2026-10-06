@@ -6,6 +6,7 @@ export type Io = {
   git(args: string[], stdin?: string): Promise<GitResult>
   read(path: string): Promise<ReadOutcome>
   write(path: string, text: string): Promise<boolean>
+  // Missing directories list nothing; other failures reject rather than inventing an empty inventory.
   list(dir: string): Promise<string[]>
   mtimeMs(path: string): Promise<number | null>
   now(): Promise<number>

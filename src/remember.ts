@@ -7,6 +7,7 @@ export function snapshot(
   headline: Headline,
   source: string | undefined,
   seen: string,
+  sourceRoot?: string,
 ): LastSeen {
   const tasks: Record<string, TaskSnap> = {}
   for (const item of sp.items) {
@@ -26,7 +27,9 @@ export function snapshot(
     tasks,
     allComplete: sp.allComplete,
     ledgerSeen: sp.ledgerSeen,
+    ...(sp.docs.plan === undefined ? {} : { plan: sp.docs.plan }),
     ...(source === undefined ? {} : { source }),
+    ...(sourceRoot === undefined ? {} : { sourceRoot }),
     seen,
   }
 }
@@ -44,7 +47,9 @@ export type RememberInput = {
   sp: SpResult | null
   headline: Headline
   sessionObserved: Observed[]
+  // Absolute ledger source, not relative to the worktree doing a later refresh.
   source?: string
+  sourceRoot?: string
   now: Date
 }
 
@@ -105,6 +110,14 @@ export function remember(input: RememberInput, prevFinishedAt: number | null): R
     note.tips = { ...note.tips, [input.branch]: input.head }
   }
 
+  const planChanged =
+    note.docs.plan !== undefined &&
+    input.docs.plan !== undefined &&
+    note.docs.plan !== input.docs.plan
+  if (planChanged) {
+    note.last = null
+    note.planTasks = []
+  }
   note.docs = { ...note.docs, ...input.docs }
   note.observed = mergeObserved(previous?.observed ?? [], input.sessionObserved)
 
@@ -121,13 +134,13 @@ export function remember(input: RememberInput, prevFinishedAt: number | null): R
 
   const seen = input.now.toISOString()
   if (input.sp?.currentLedger) {
-    note.last = snapshot(input.sp, input.headline, input.source, seen)
+    note.last = snapshot(input.sp, input.headline, input.source, seen, input.sourceRoot)
   } else if (note.last !== null) {
     note.last = { ...note.last, phase: input.headline.phase }
   }
 
   const finishedAt =
-    prevFinishedAt ??
+    (planChanged ? null : prevFinishedAt) ??
     (input.headline.phase === 'done' || input.headline.phase === 'merged'
       ? Math.floor(input.now.getTime() / 1000)
       : null)

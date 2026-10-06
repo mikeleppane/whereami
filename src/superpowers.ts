@@ -7,9 +7,14 @@ export type SpInput = {
   plan: PlanInfo | null
   ledger: ReadOutcome | null
   ledgerPath?: string
+  // A recovered ledger may name its plan absolutely in a different worktree.
+  ledgerRoot?: string
   repoRoot: string
   previous: LastSeen | null
-  taskCommits: number[]
+  // null: the branch's commits are unknown (git failed or its output was cut), never none.
+  taskCommits: number[] | null
+  // Why the plan file could not be read (too big, not text, an error); a missing plan is `plan: null` alone.
+  planUnreadable?: string
 }
 export type SpResult = ReaderResult & {
   allComplete: boolean
@@ -244,6 +249,13 @@ function readLedger(input: SpInput, ledger: Ledger): SpResult {
 }
 
 export function readSuperpowers(input: SpInput): SpResult {
+  // An unreadable plan is no missing one: no design claim, and the saved snapshot is left as it was.
+  if (input.planUnreadable !== undefined) {
+    const reason = `plan ${repoRelative(input.planPath, input.repoRoot)}: unsupported format (${input.planUnreadable})`
+    const result = baseResult(input, [], 'unknown')
+    result.notes.push(reason)
+    return { ...result, unsupported: reason }
+  }
   if (input.ledger && !input.ledger.ok) return unsupported(input, UNSUPPORTED_FILE)
 
   let ledger: Ledger | null = null
@@ -252,7 +264,8 @@ export function readSuperpowers(input: SpInput): SpResult {
     if ('unsupported' in parsed) return unsupported(input, parsed.unsupported)
     ledger = parsed
     if (
-      repoRelative(ledger.plan, input.repoRoot) !== repoRelative(input.planPath, input.repoRoot)
+      repoRelative(ledger.plan, input.ledgerRoot ?? input.repoRoot) !==
+      repoRelative(input.planPath, input.repoRoot)
     ) {
       return unsupported(input, 'ledger names another plan')
     }
@@ -270,6 +283,12 @@ export function readSuperpowers(input: SpInput): SpResult {
     return result
   }
 
+  if (input.taskCommits === null) {
+    const result = baseResult(input, planItems(input), 'plan')
+    result.weak = true
+    result.notes.push('commits unknown: git could not list this branch, so none can be ruled out')
+    return result
+  }
   if (input.taskCommits.length > 0) {
     const tasks = [...new Set(input.taskCommits)]
     const planned = new Map(input.plan.tasks.map((task) => [task.n, task]))
