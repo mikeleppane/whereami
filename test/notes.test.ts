@@ -64,6 +64,7 @@ test('branchFiles writes message as one JSON string line and a dot line', () => 
     name: 'feat/a',
     seen: 1791200000,
     message: text,
+    detail: '',
     context: 'c',
     agents: '',
     watch: [],
@@ -73,7 +74,15 @@ test('branchFiles writes message as one JSON string line and a dot line', () => 
 })
 
 test('branchFiles writes watch as one path per line, a lone line break when there is none', () => {
-  const s = { featureId: 'a', name: 'b', seen: 1, message: 'm', context: 'c', agents: '' }
+  const s = {
+    featureId: 'a',
+    name: 'b',
+    seen: 1,
+    message: 'm',
+    detail: '',
+    context: 'c',
+    agents: '',
+  }
   expect(branchFiles({ ...s, watch: [] }).watch).toBe('\n')
   expect(branchFiles({ ...s, watch: ['/r/a.md', '/r/b c'] }).watch).toBe('/r/a.md\n/r/b c\n')
 })

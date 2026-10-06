@@ -166,8 +166,12 @@ seen=$(readf "$B/seen") && epoch "$seen" || exit 0
 message=$(line "$B/message" 2>/dev/null) || exit 0
 context=$(line "$B/context" 2>/dev/null) || exit 0
 agents=
+detail=
 if [ -s "$B/agents" ]; then
 	agents=$(line "$B/agents" 2>/dev/null) || exit 0
+fi
+if [ -s "$B/detail" ]; then
+	detail=$(line "$B/detail" 2>/dev/null) || exit 0
 fi
 
 age=$(($(date +%s) - seen))
@@ -187,7 +191,7 @@ if [ -f "$B/watch" ]; then
 	while IFS= read -r p || [ -n "$p" ]; do
 		[ -n "$p" ] || continue
 		if [ ! -e "$p" ] || [ -n "$(find "$p" -newer "$B/seen" -print 2>/dev/null | head -n 1)" ]; then
-			warning=' · files changed since; open /whereami for a fresh look'
+			warning='\n  files changed since; open /whereami for a fresh look'
 			break
 		fi
 	done <"$B/watch"
@@ -198,6 +202,6 @@ clear | compact) [ -z "$agents" ] || agents="\\n  $agents" ;;
 *) agents= ;;
 esac
 
-printf '{"systemMessage":"%s · as of %s (%s)%s%s","hookSpecificOutput":{"hookEventName":"SessionStart","additionalContext":"%s%s"}}\n' \
-	"$message" "$at" "$ago" "$warning" "$agents" "$context" "$agents"
+printf '{"systemMessage":"%s · as of %s (%s)%s%s%s","hookSpecificOutput":{"hookEventName":"SessionStart","additionalContext":"%s%s"}}\n' \
+	"$message" "$at" "$ago" "$detail" "$warning" "$agents" "$context" "$agents"
 exit 0

@@ -18,6 +18,7 @@ export type BranchSummary = {
   name: string
   seen: number
   message: string
+  detail: string
   context: string
   agents: string
   watch: string[]
@@ -29,11 +30,15 @@ const printed = (text: string) => `${jsonString(text)}\n.\n`
 // The files hooks/session-start.sh reads; `seen` last, so a watched file written before it never reads as newer.
 export function branchFiles(
   s: BranchSummary,
-): Record<'feature' | 'name' | 'seen' | 'message' | 'context' | 'agents' | 'watch', string> {
+): Record<
+  'feature' | 'name' | 'seen' | 'message' | 'detail' | 'context' | 'agents' | 'watch',
+  string
+> {
   return {
     feature: `${s.featureId}\n`,
     name: `${s.name}\n`,
     message: printed(s.message),
+    detail: s.detail === '' ? '' : printed(s.detail),
     context: printed(s.context),
     agents: s.agents === '' ? '' : printed(s.agents),
     watch: lines(s.watch),

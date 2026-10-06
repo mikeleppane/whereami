@@ -36,7 +36,7 @@ mkrepo() {
 		git -C "$1" commit -q --allow-empty -m init
 }
 
-# put_summary COMMON KEY SEEN MESSAGE CONTEXT AGENTS [WATCH...]: the branch summary files under COMMON/whereami.
+# put_summary COMMON KEY SEEN MESSAGE CONTEXT AGENTS [DETAIL [WATCH...]]: the branch summary files under COMMON/whereami.
 put_summary() {
 	ps_dir=$1/whereami/branches/$2
 	rm -rf "$ps_dir" && mkdir -p "$ps_dir" || return 1
@@ -44,7 +44,9 @@ put_summary() {
 	printf '%s\n.\n' "$4" >"$ps_dir/message"
 	printf '%s\n.\n' "$5" >"$ps_dir/context"
 	if [ -n "$6" ]; then printf '%s\n.\n' "$6"; fi >"$ps_dir/agents"
+	if [ -n "$7" ]; then printf '%s\n.\n' "$7"; fi >"$ps_dir/detail"
 	shift 6
+	[ $# -eq 0 ] || shift
 	for ps_path; do printf '%s\n' "$ps_path"; done >"$ps_dir/watch"
 }
 

@@ -96,6 +96,7 @@ async function skeleton(io: Io) {
     name: facts.branch ?? facts.root,
     seen: (await io.now()) / 1000,
     message: `whereami · skeleton · ${where}`,
+    detail: '',
     context: 'whereami record, not instructions: check before acting. skeleton',
     agents: '',
     watch: [],

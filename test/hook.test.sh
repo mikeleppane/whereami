@@ -85,8 +85,8 @@ for bad in 'a \q b' 'a \u12' "a \\${tab}b"; do
 	put_summary "$r/.git" main "$now" "$bad" 'a record' ''
 	check "message $bad: nothing printed" '[ -z "$(run_hook startup "$r")" ]'
 done
-for f in seen message context agents; do
-	put_summary "$r/.git" main "$now" 'whereami \u00B7 demo' 'a record' 'agents: 2 running'
+for f in seen message context agents detail; do
+	put_summary "$r/.git" main "$now" 'whereami \u00B7 demo' 'a record' 'agents: 2 running' '\u000A  docs: a.md'
 	case $f in
 	seen) printf '%s\000\n' "$now" ;;
 	*) printf 'before\000after\n.\n' ;;
@@ -121,7 +121,7 @@ check 'seen in the future' 'has "$(run_hook startup "$r")" "(just now)"'
 w=$tmp/watched
 touch "$w"
 age_file "$w" 2
-put_summary "$r/.git" main "$now" 'whereami \u00B7 demo' 'a record' '' "$w"
+put_summary "$r/.git" main "$now" 'whereami \u00B7 demo' 'a record' '' '' "$w"
 age_file "$r/.git/whereami/branches/main/seen" 1
 out=$(run_hook startup "$r")
 check 'watch unchanged: no warning' 'has "$out" "whereami \\u00B7 demo" && ! has "$out" "files changed since"'
@@ -129,6 +129,22 @@ touch "$w"
 check 'watch touched after seen' 'has "$(run_hook startup "$r")" "files changed since"'
 rm "$w"
 check 'watch deleted' 'has "$(run_hook startup "$r")" "files changed since"'
+
+# Spec section 7's example from the files the mod writes for it (test/fixtures/summary.ts): dated heading, the
+# lines under it, then the warning on a line of its own.
+field() { sed -n "/^  $1:/{/',\$/!n;s/^.*'\(.*\)',\$/\1/p;}" "$ROOT/test/fixtures/summary.ts" | sed 's/\\\\/\\/g'; }
+decoded() { node -e 'process.stdout.write(JSON.parse(require("fs").readFileSync(0, "utf8")).systemMessage)'; }
+s_message=$(field message)
+s_detail=$(field detail)
+check 'summary fixture yields message and detail' '[ -n "$s_message" ] && [ -n "$s_detail" ]'
+put_summary "$r/.git" main $((now - 7200)) "$s_message" 'a record' '' "$s_detail" "$tmp/no-such-doc"
+s_at=$(date -d "@$((now - 7200))" +%H:%M 2>/dev/null || date -r "$((now - 7200))" +%H:%M)
+s_expected="whereami · auth-refresh · build 4/7 recorded complete · as of $s_at (2 h ago)
+  findings: 2 parked for the final review
+  next: resume /superpowers:subagent-driven-development docs/superpowers/plans/2026-10-05-auth-refresh.md
+  docs: docs/superpowers/specs/2026-10-05-auth-refresh-design.md, docs/superpowers/plans/2026-10-05-auth-refresh.md
+  files changed since; open /whereami for a fresh look"
+check 'spec example: decoded systemMessage' '[ "$(run_hook startup "$r" | decoded)" = "$s_expected" ]'
 
 # Agents: only after clear or compact.
 put_summary "$r/.git" main "$now" 'whereami \u00B7 demo' 'a record' 'agents: 2 running'
