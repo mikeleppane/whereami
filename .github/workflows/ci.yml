@@ -51,7 +51,10 @@ jobs:
         env:
           MSYS_NO_PATHCONV: 1
       - run: npx claude plugin test .
+      # Git Bash copies on ln -s by default (and fails on a missing target); the hook tests need real links.
       - run: for t in test/*.test.sh; do sh "$t" || exit 1; done
+        env:
+          MSYS: winsymlinks:sys
 
   e2e:
     runs-on: ubuntu-latest
