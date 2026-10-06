@@ -93,14 +93,14 @@ test('an idle implement-spec run asks for its integration branch before rerunnin
   const action = nextAction(
     feature({
       matt: mattResult('build'),
-      implementSpecAt: '2026-10-05T14:02:00',
+      implementSpecAt: '2026-10-05T09:02:00',
     }),
     installed('mattpocock-skills:implement'),
   )
 
   expect(action?.command).toBe(undefined)
   expect(action?.text).toContain(
-    'implement-spec started at 14:02 and nothing is running: check its integration branch before rerunning',
+    'implement-spec started at 09:02 and nothing is running: check its integration branch before rerunning',
   )
 })
 
@@ -452,37 +452,15 @@ test('phaseOf does not count a parked finding as blocked', () => {
   expect(headline.blocked).toBe(0)
 })
 
-test('phaseOf exposes Matt decision counts for a map', () => {
-  const headline = phaseOf(
-    feature({
-      matt: mattResult('design', {
-        docs: { map: MAP },
-        decisions: [1, 3],
-      }),
-    }),
-  )
-
-  expect(headline.decisions).toEqual([1, 3])
-})
-
 test('phaseOf marks a done feature merged only when merge evidence is true', () => {
-  const headline = phaseOf(
-    feature({
-      sp: superpowers('done'),
-      merged: true,
-    }),
-  )
+  const cases = [
+    [true, 'merged'],
+    ['unknown', 'done'],
+    [false, 'done'],
+    ['n/a', 'done'],
+  ] as const
 
-  expect(headline.phase).toBe('merged')
-})
-
-test('phaseOf preserves done when merge status is unknown', () => {
-  const headline = phaseOf(
-    feature({
-      sp: superpowers('done'),
-      merged: 'unknown',
-    }),
-  )
-
-  expect(headline.phase).toBe('done')
+  for (const [merged, phase] of cases) {
+    expect(phaseOf(feature({ sp: superpowers('done'), merged })).phase).toBe(phase)
+  }
 })

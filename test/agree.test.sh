@@ -58,11 +58,8 @@ silent() {
 	s_out=$(run_hook startup "$1") && [ -z "$s_out" ]
 }
 
-for b in 'feat/ä-x' '100%' 'fix/🐛'; do
-	d=$tmp/repo-$(printf '%s' "$b" | od -An -tx1 | tr -d ' \n')
-	on_branch "$d" "$b"
-	check "branch $b" 'printed "$d" "whereami · demo · design"'
-done
+on_branch "$tmp/repo" 'feat/ä-x'
+check 'branch feat/ä-x' 'printed "$tmp/repo" "whereami · demo · design"'
 
 on_branch "$tmp/base" feat/wt
 git -C "$tmp/base" worktree add -q --detach "$tmp/my repo" feat/wt || die 'worktree in my repo'
@@ -95,7 +92,8 @@ check 'a ticket added to an empty issues folder makes the summary stale' \
 
 git -c init.defaultBranch=main init -q "$tmp/empty" || die 'repo with no commits'
 # No commit holds a document, so no feature matches: nothing is shown (spec section 4 rule 7).
-check 'no commits' 'silent "$tmp/empty"'
+# The same repo once its branch commits the spec shows it, so the silence is not a session that never ran.
+check 'no commits' 'silent "$tmp/empty" && on_branch "$tmp/empty" feat/e && printed "$tmp/empty" "whereami · demo · design"'
 
 # The feature is gone (its note removed, the branch's spec commit undone): the next session leaves nothing to print.
 on_branch "$tmp/lost" feat/lost

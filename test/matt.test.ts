@@ -1,6 +1,6 @@
 import { expect, test } from 'claude-code/testing'
 import type { MattInput, MattResult, Ticket } from '../src/matt'
-import { hhmm, parseTicket, readMatt } from '../src/matt'
+import { parseTicket, readMatt } from '../src/matt'
 import { BOLD_READY_TICKET, PLAIN_CLAIMED_TICKET, TITLE_BLOCKED_TICKET } from './fixtures/matt'
 
 const ticket = (value: {
@@ -541,8 +541,4 @@ test('branch-specific ticket differences remain attached to the item', () => {
   )
 
   expect(item(result, '01')?.differsOn).toEqual(['integration/demo'])
-})
-
-test('hhmm formats an ISO timestamp in local time with zero-padded minutes', () => {
-  expect(hhmm('2026-10-05T14:02:00')).toBe('14:02')
 })

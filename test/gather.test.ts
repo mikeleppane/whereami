@@ -1,5 +1,4 @@
 import { expect, test } from 'claude-code/testing'
-import { classifyDoc, resolveFeature } from '../src/feature'
 import {
   branchCommits,
   buildBranch,
@@ -70,23 +69,6 @@ test('branchCommits reads each commit of the branch with its subject and files',
     { sha: A, subject: 'feat: store (Task 1)', files: ['.scratch/ä/spec.md', 'src/b.ts'] },
     { sha: A, subject: 'empty', files: [] },
     { sha: B, subject: 'fix\tthing', files: ['.scratch/x/issues/01-a.md'] },
-  ])
-  // Spec section 4 rule 5: a committed document with no note starts its feature.
-  const docs = (commits ?? []).flatMap((c) => c.files.flatMap((f) => classifyDoc(f, '/r') ?? []))
-  const identity = resolveFeature({
-    branch: 'feat/a',
-    isDefault: false,
-    notes: [],
-    ledgerPlans: [],
-    skillDocs: [],
-    writtenDocs: [],
-    commitDocs: docs.slice(0, 1),
-    planSpecs: {},
-    docTimes: {},
-  })
-  expect(identity.kind === 'one' && [identity.id, identity.create?.path]).toEqual([
-    'ä',
-    '.scratch/ä/spec.md',
   ])
   const cut = fakeIo({}, (args) =>
     args.join(' ') === log ? { code: 0, out, truncated: true } : null,

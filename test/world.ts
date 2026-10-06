@@ -1,9 +1,43 @@
 import type { AgentStatus, On } from 'claude-code'
-import { type MockClock, mock } from 'claude-code/testing'
+import { type Engine, type MockClock, mock } from 'claude-code/testing'
+import { serializeNote } from '../src/notes'
 import type { GitResult } from '../src/types'
 
 // Where the world's clock starts, in epoch ms.
 export const NOW = Date.UTC(2026, 9, 6)
+
+export const W = '/r/.git/whereami'
+
+// Every refresh starts with this git call: the count of refreshes run so far.
+export const TOP =
+  'process.run git rev-parse --path-format=absolute --show-toplevel --git-common-dir'
+export const refreshes = (w: { calls: string[] }) => w.calls.filter((c) => c === TOP).length
+
+export const bash = ($: Engine) => $.tool.call({ tool: 'Bash', command: 'ls' })
+
+export const CHOOSE = 'whereami · 2 features could match · /whereami to choose'
+
+// A plugin beneath whereami that draws its own band line (`<Text>below</Text>`).
+export const below = (on: On) =>
+  on('ui.render', { component: 'AbovePrompt' }, ($, e) => {
+    const { Text } = $.ui.resolve(e)
+    return h(Text, null, 'below') as JSX.Element
+  })
+
+// A note of feature `id` linked to `branches`, owning its spec.
+export const linked = (id: string, branches = ['feat/auth']) => ({
+  [`${W}/features/${id}/note.json`]: serializeNote({
+    version: 1,
+    id,
+    branches,
+    unlinked: [],
+    tips: {},
+    docs: { spec: `docs/superpowers/specs/2026-10-01-${id}-design.md` },
+    planTasks: [],
+    observed: [],
+    last: null,
+  }),
+})
 
 // The world beneath whereami, from memory: absolute paths to text (a folder is any prefix of one), git answered
 // as in fake-io.ts (a string is code 0 with that output, null is code 128), the session's agents (none: the

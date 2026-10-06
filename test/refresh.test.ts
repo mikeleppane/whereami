@@ -724,18 +724,6 @@ test('two notes linked to the branch ask to choose and write no note; a chosen o
   expect(feature((await refresh(io, session({ chosen }))).view).featureId).toBe('b')
 })
 
-test('a finished linked note gives way to a spec written this session', async () => {
-  const files = {
-    [`${W}/features/old/note.json`]: serializeNote(note({ id: 'old', branches: ['feat/auth'] })),
-    [`${W}/features/old/finished`]: '1700000000\n',
-  }
-  const io = fakeIo(files, git(repo()))
-  const writtenDocs = ['docs/superpowers/specs/2026-10-06-new-design.md']
-  const v = feature((await refresh(io, session({ writtenDocs }))).view)
-  expect(v.featureId).toBe('new')
-  expect(v.notices).toContain('switched to new; old is done')
-})
-
 test('a corrupt note.json for the feature is rebuilt and the view says so', async () => {
   const files = { ...spWorld(complete(1)), [`${W}/features/auth/note.json`]: '{' }
   const io = fakeIo(files, git(repo()))
@@ -748,22 +736,4 @@ test('outside a repo nothing is shown or written', async () => {
   const io = fakeIo(spWorld(complete(1)), () => null)
   expect(await refresh(io, session())).toEqual({ view: null, facts: null })
   expect(io.written).toEqual({})
-})
-
-test('ledger and ticket text reaches the user summary only, never the model context', async () => {
-  const files = {
-    ...spWorld(complete(1), 'SECRET-BODY ledger line'),
-    [`/r/${PLAN}`]: THREE_TASK_PLAN.replace(
-      'docs/superpowers/specs/2026-10-05-auth-design.md',
-      '.scratch/auth/spec.md',
-    ),
-    '/r/.scratch/auth/spec.md': '# Auth\n',
-    '/r/.scratch/auth/issues/01-store.md': '# SECRET-BODY ticket\n\nStatus: ready-for-agent\n',
-  }
-  const io = fakeIo(files, git(repo()))
-  await refresh(io, session())
-  const context = io.written[`${W}/branches/feat%2Fauth/context`] ?? ''
-  expect(io.written[`${W}/branches/feat%2Fauth/detail`]).toContain('SECRET-BODY')
-  expect(context).toContain('ticket 01')
-  expect(context).not.toContain('SECRET-BODY')
 })

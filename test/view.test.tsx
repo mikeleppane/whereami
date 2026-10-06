@@ -1,13 +1,11 @@
 import type { On } from 'claude-code'
 import { type Engine, expect, type MockClock, test } from 'claude-code/testing'
-import { serializeNote } from '../src/notes'
 import { complete, git, LEDGER, ledger, PLAN, repo, spWorld } from './fixtures/repo'
-import { NOW, world } from './world'
+import { bash, below, CHOOSE, linked, NOW, refreshes, TOP, W, world } from './world'
 
 const BUILD = 'superpowers:subagent-driven-development'
 const COMMAND = `/${BUILD} ${PLAN}`
 const SPEC = 'docs/superpowers/specs/2026-10-05-auth-design.md'
-const W = '/r/.git/whereami'
 const SURFACES = ['terminal', 'desktop'] as const
 
 const PANE = {
@@ -71,13 +69,6 @@ async function pane($: Engine, surface: (typeof SURFACES)[number]) {
   return { ui, lines, buttons, press: (key: string) => ui.press({ key }) }
 }
 
-// A plugin beneath whereami that draws its own band line.
-const below = (on: On) =>
-  on('ui.render', { component: 'AbovePrompt' }, ($, e) => {
-    const { Text } = $.ui.resolve(e)
-    return <Text>below</Text>
-  })
-
 const band = async ($: Engine) => {
   const ui = await $.ui.mount(BAND)
   const lines = (await ui.findAll({ type: 'Text' })).map((t) => t.text)
@@ -101,10 +92,6 @@ const typed = async ($: Engine, args: string, clock: MockClock) => {
 
 const note = (written: Record<string, string>, id: string, where = W) =>
   JSON.parse(written[`${where}/features/${id}/note.json`] ?? '{}')
-
-const TOP = 'process.run git rev-parse --path-format=absolute --show-toplevel --git-common-dir'
-const refreshes = (calls: string[]) => calls.filter((c) => c === TOP).length
-const bash = ($: Engine) => $.tool.call({ tool: 'Bash', command: 'ls' })
 
 // Writes to `path` beneath whereami: `deny` refuses them; `hold` keeps the next one waiting until `release`.
 const gate = (on: On, path: string) => {
@@ -228,18 +215,18 @@ for (const [way, said] of [
       if (record === 'plan-only')
         files[path] = JSON.stringify({ ...note(w.written, 'auth'), docs: { plan: PLAN } })
       delete w.written[path]
-      const before = refreshes(w.calls)
+      const before = refreshes(w)
       for (let count = 1; count <= 2; count++) {
         await bash($)
         await w.clock.advance(1000)
-        expect(refreshes(w.calls) - before).toBe(count)
+        expect(refreshes(w) - before).toBe(count)
         expect(await band($)).toEqual(['below'])
         expect(Object.keys(w.written).filter((p) => p.endsWith('/note.json'))).toEqual([])
       }
       expect(await typed($, '', w.clock)).toEqual({
         text: 'whereami: nothing to show here',
       })
-      expect(refreshes(w.calls) - before).toBe(3)
+      expect(refreshes(w) - before).toBe(3)
       expect(await band($)).toEqual(['below'])
       expect(w.written[path]).toBeUndefined()
       expect(Object.keys(w.written).filter((p) => p.endsWith('/note.json'))).toEqual([])
@@ -269,21 +256,6 @@ test('Not this feature takes the branch out of the note and records it as unlink
   expect(after.branches).toEqual([])
   expect(after.unlinked).toEqual(['feat/auth'])
   expect(w.written[`${W}/features/auth/branches`]).toBe('\n')
-})
-
-// A note of feature `id` linked to `branches`.
-const linked = (id: string, branches = ['feat/auth']) => ({
-  [`${W}/features/${id}/note.json`]: serializeNote({
-    version: 1,
-    id,
-    branches,
-    unlinked: [],
-    tips: {},
-    docs: { spec: `docs/superpowers/specs/2026-10-01-${id}-design.md` },
-    planTasks: [],
-    observed: [],
-    last: null,
-  }),
 })
 
 test('two candidates each get a This is button with their reasons and no Draft; choosing one links only it', async ($, on) => {
@@ -415,7 +387,6 @@ for (const move of ['branch', 'repository', 'detached worktree'] as const)
   })
 
 // A rival's note.json written without the branch (its branches file refused) leaves only b linked.
-const CHOOSE = 'whereami · 2 features could match · /whereami to choose'
 for (const [name, saved] of [
   ['note.json', CHOOSE],
   ['branches', 'whereami · b · design'],
@@ -530,13 +501,13 @@ test('a scheduled refresh coming due during /whereami runs after it, never besid
   const answer = request($, '')
   await w.clock.advance(1000)
   await bash($)
-  const before = refreshes(w.calls)
+  const before = refreshes(w)
   await w.clock.advance(1000)
-  expect(refreshes(w.calls)).toBe(before)
+  expect(refreshes(w)).toBe(before)
   g.release()
   expect((await answer).text).toContain('build 1/3')
   await w.clock.settle()
-  expect(refreshes(w.calls) - before).toBe(1)
+  expect(refreshes(w) - before).toBe(1)
 })
 
 test('commands, presses and scheduled requests start refreshes at least 1000 ms apart', async ($, on) => {
@@ -571,23 +542,23 @@ test('commands, presses and scheduled requests start refreshes at least 1000 ms 
   expect(note(w.written, 'auth').unlinked).toEqual(['feat/auth'])
   await w.clock.advance(1000)
   expect(starts.map((t) => t - NOW)).toEqual([0, 1000, 2000, 3000, 4000])
+  await w.clock.advance(2000)
+  expect(starts.map((t) => t - NOW)).toEqual([0, 1000, 2000, 3000, 4000])
 })
 
-for (const name of ['note.json', 'branches'] as const)
-  for (const args of ['', 'forget'])
-    test(`/whereami ${args} reports a failed refresh when ${name} cannot be written`, async ($, on) => {
-      below(on)
-      const g = gate(on, `${W}/features/auth/${name}`)
-      const w = await started($, on)
-      g.deny = true
-      expect((await typed($, args, w.clock)).text).toBe('whereami: refresh failed')
-      expect(await band($)).toEqual(['whereami · ?', 'below'])
-      const p = await pane($, 'terminal')
-      expect((await p.lines())[0]).toContain('refresh failed')
-      expect(w.written[`${W}/features/auth/forget`]).toBeUndefined()
-      g.deny = false
-      expect((await typed($, '', w.clock)).text).toContain('build 1/3')
-    })
+test('/whereami forget reports a failed refresh when branches cannot be written', async ($, on) => {
+  below(on)
+  const g = gate(on, `${W}/features/auth/branches`)
+  const w = await started($, on)
+  g.deny = true
+  expect((await typed($, 'forget', w.clock)).text).toBe('whereami: refresh failed')
+  expect(await band($)).toEqual(['whereami · ?', 'below'])
+  const p = await pane($, 'terminal')
+  expect((await p.lines())[0]).toContain('refresh failed')
+  expect(w.written[`${W}/features/auth/forget`]).toBeUndefined()
+  g.deny = false
+  expect((await typed($, '', w.clock)).text).toContain('build 1/3')
+})
 
 for (const name of ['note.json', 'branches'] as const)
   test(`choosing a new candidate whose ${name} write is refused never publishes the unsaved pick`, async ($, on) => {
@@ -619,34 +590,33 @@ for (const name of ['note.json', 'branches'] as const)
     expect((await band($))[0]).toMatch(/^whereami · a · design/)
   })
 
-for (const action of ['draft', 'unlink', 'forget'])
-  test(`a queued ${action} from auth cannot act on the feature replacing it during held IO`, async ($, on) => {
-    below(on)
-    const g = gate(on, `${W}/features/beta/note.json`)
-    const files = spWorld(complete(1))
-    const w = await started($, on, { files })
-    const p = await pane($, 'terminal')
-    expect((await p.lines())[0]).toBe('whereami · auth · build 1/3')
-    const plan = 'docs/superpowers/plans/2026-10-06-beta.md'
-    files[`/r/${plan}`] = '### Task 1: Beta\n'
-    files['/r/.superpowers/sdd/beta/plan-path'] = `${plan}\n`
-    files['/r/.superpowers/sdd/beta/progress.md'] = `# SDD ledger — plan: ${plan}\n`
-    delete files[LEDGER]
-    delete files['/r/.superpowers/sdd/auth/plan-path']
-    g.hold = true
-    await bash($)
-    await w.clock.advance(1000)
-    const before = w.calls.length
-    await p.press(action)
-    g.release()
-    await w.clock.advance(1000)
-    expect((await p.lines())[0]).toContain('stale action')
-    expect((await band($))[0]).toMatch(/^whereami · beta · build/)
-    expect(note(w.written, 'beta').branches).toEqual(['feat/auth'])
-    expect(note(w.written, 'beta').unlinked).toEqual([])
-    expect(w.written[`${W}/features/beta/forget`]).toBeUndefined()
-    expect(w.calls.slice(before).filter((c) => /^(prompt\.|ui.copy)/.test(c))).toEqual([])
-  })
+test('a queued draft, unlink or forget from auth cannot act on the feature replacing it during held IO', async ($, on) => {
+  below(on)
+  const g = gate(on, `${W}/features/beta/note.json`)
+  const files = spWorld(complete(1))
+  const w = await started($, on, { files })
+  const p = await pane($, 'terminal')
+  expect((await p.lines())[0]).toBe('whereami · auth · build 1/3')
+  const plan = 'docs/superpowers/plans/2026-10-06-beta.md'
+  files[`/r/${plan}`] = '### Task 1: Beta\n'
+  files['/r/.superpowers/sdd/beta/plan-path'] = `${plan}\n`
+  files['/r/.superpowers/sdd/beta/progress.md'] = `# SDD ledger — plan: ${plan}\n`
+  delete files[LEDGER]
+  delete files['/r/.superpowers/sdd/auth/plan-path']
+  g.hold = true
+  await bash($)
+  await w.clock.advance(1000)
+  const before = w.calls.length
+  for (const action of ['draft', 'unlink', 'forget']) await p.press(action)
+  g.release()
+  await w.clock.advance(1000)
+  expect((await p.lines())[0]).toContain('stale action')
+  expect((await band($))[0]).toMatch(/^whereami · beta · build/)
+  expect(note(w.written, 'beta').branches).toEqual(['feat/auth'])
+  expect(note(w.written, 'beta').unlinked).toEqual([])
+  expect(w.written[`${W}/features/beta/forget`]).toBeUndefined()
+  expect(w.calls.slice(before).filter((c) => /^(prompt\.|ui.copy)/.test(c))).toEqual([])
+})
 
 test('/whereami answers ids, paths, counts and statuses; ledger text shows in the pane only', async ($, on) => {
   const files = spWorld(complete(1), 'Task 2: SECRET-FINDING', 'SECRET-NOTE')

@@ -168,7 +168,7 @@ test('missing plans and unreadable ledgers preserve the saved task snapshot', ()
   }
 })
 
-test('a live ledger can contain removal wording and still update the snapshot', () => {
+test('a current ledger overwrites the prior snapshot', () => {
   const previous = remember(input({ sp: result(), headline: headline('build') }), null).note
   const sp = readSuperpowers({
     planPath: 'docs/superpowers/plans/auth.md',

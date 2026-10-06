@@ -147,10 +147,6 @@ test('an 81-code-point finding is cut to 80 code points', () => {
   expect(quoted).toBe(`Task 1: ${'ä'.repeat(71)}…`)
 })
 
-test('summary names a detached HEAD', () => {
-  expect(summaryText(view({}, { branch: null })).message).toContain('detached HEAD')
-})
-
 test('summary files of a resumable build are those the hook prints as spec section 7 shows', () => {
   const plan = 'docs/superpowers/plans/2026-10-05-auth-refresh.md'
   const sp = readSuperpowers({

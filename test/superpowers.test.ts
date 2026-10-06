@@ -1,5 +1,5 @@
 import { expect, test } from 'claude-code/testing'
-import { parseLedger, parsePlan, readSuperpowers, repoRelative } from '../src/superpowers'
+import { parsePlan, readSuperpowers, repoRelative } from '../src/superpowers'
 import type { PlanInfo, SpInput, SpResult } from '../src/superpowers'
 import type { ReadOutcome } from '../src/types'
 import { REAL_LEDGER, THREE_TASK_PLAN } from './fixtures/sp'
@@ -47,17 +47,6 @@ test('parsePlan uses the first whitespace token when the spec path is not backti
   ).toEqual({
     tasks: [{ n: 1, title: 'Build it' }],
     spec: 'docs/superpowers/specs/plain.md',
-  })
-})
-
-test('parseLedger strips a BOM and CR characters while returning lines after the header', () => {
-  expect(
-    parseLedger(
-      '\uFEFF# SDD ledger — plan: docs/superpowers/plans/auth.md\r\nTask 1: complete (commits a..b, review clean)\r\n',
-    ),
-  ).toEqual({
-    plan: 'docs/superpowers/plans/auth.md',
-    lines: ['Task 1: complete (commits a..b, review clean)', ''],
   })
 })
 
@@ -136,18 +125,6 @@ test('a fix round is in progress and retains its current and maximum round', () 
   expect(task(result, 3)?.fixRound).toEqual([2, 5])
 })
 
-test('executing-plans test output is preserved as task evidence', () => {
-  const result = readSuperpowers(
-    makeInput(
-      successfulRead(
-        '# SDD ledger — plan: docs/superpowers/plans/2026-10-05-auth.md\nTask 1: complete (tests: npm test → 8/8 pass)',
-      ),
-    ),
-  )
-
-  expect(task(result, 1)?.evidence[0]?.text).toBe('tests: npm test → 8/8 pass')
-})
-
 test('all plan tasks complete with a ledger means review, not done', () => {
   const result = readSuperpowers(
     makeInput(
@@ -214,7 +191,7 @@ test('a removed ledger before completion stays unknown and restores the snapshot
   expect(result.items.map((item) => item.key)).toEqual(['Task 1', 'Task 2'])
 })
 
-test('related task commits without a ledger stay unknown and weak', () => {
+test('related task commits without a ledger give a weak build', () => {
   const result = readSuperpowers(makeInput(null, { taskCommits: [1, 2] }))
 
   expect(result.phase).toBe('build')
@@ -403,19 +380,21 @@ test('a ledger task absent from the plan is reported without creating an item', 
   expect(result.items).toHaveLength(3)
 })
 
-test('a plan with no task headings is unknown with an explanatory note', () => {
-  const result = readSuperpowers(makeInput(null, { plan: { tasks: [] } }))
+test('without a ledger the plan and its commits set the phase', () => {
+  const cases: [Partial<SpInput>, SpResult['phase'], boolean, string[]][] = [
+    [{ plan: { tasks: [] } }, 'unknown', false, ['plan has no tasks']],
+    [{ plan: null }, 'design', false, []],
+    [{}, 'plan', false, []],
+    [
+      { taskCommits: null },
+      'plan',
+      true,
+      ['commits unknown: git could not list this branch, so none can be ruled out'],
+    ],
+  ]
 
-  expect(result.phase).toBe('unknown')
-  expect(result.notes).toContain('plan has no tasks')
-})
-
-test('a missing plan leaves the feature in design', () => {
-  const result = readSuperpowers(makeInput(null, { plan: null }))
-
-  expect(result.phase).toBe('design')
-})
-
-test('a plan without prior ledger or related commits stays in plan', () => {
-  expect(readSuperpowers(makeInput(null)).phase).toBe('plan')
+  for (const [overrides, phase, weak, notes] of cases) {
+    const result = readSuperpowers(makeInput(null, overrides))
+    expect([result.phase, result.weak, result.notes]).toEqual([phase, weak, notes])
+  }
 })

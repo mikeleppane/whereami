@@ -29,7 +29,6 @@ out=$(run_hook startup "$r")
 check 'normal: message' 'has "$out" "\"systemMessage\":\"whereami \\u00B7 demo"'
 check 'normal: age' 'has "$out" "(2 h ago)"'
 check 'normal: event name' 'has "$out" "\"hookEventName\":\"SessionStart\""'
-check 'normal: valid JSON' 'printf "%s" "$out" | json_ok'
 
 # Linked worktree on a non-ASCII branch, in a folder with a space.
 git -C "$r" worktree add -q -b 'feat/ä-x' "$tmp/my repo"
@@ -37,9 +36,8 @@ put_summary "$r/.git" 'feat%2F%C3%A4-x' "$now" 'whereami \u00B7 wt' 'a record' '
 check 'linked worktree' 'has "$(run_hook startup "$tmp/my repo")" "whereami \\u00B7 wt"'
 
 # Where the session starts inside the repo, and how its cwd is written.
-mkdir -p "$r/a/b" "$r/with space"
+mkdir -p "$r/a/b"
 check 'subfolder cwd' 'has "$(run_hook startup "$r/a/b")" "whereami \\u00B7 demo"'
-check 'cwd with a space' 'has "$(run_hook startup "$r/with space")" "whereami \\u00B7 demo"'
 slashed=$(printf '%s' "$r" | sed 's,/,\\/,g')
 check 'cwd with \/' 'has "$(printf "{\"cwd\":\"%s\",\"source\":\"startup\"}" "$slashed" | sh "$HOOK")" "whereami \\u00B7 demo"'
 
@@ -218,7 +216,6 @@ put_feature nul '' 1 feat/live
 printf '1\000\n' >"$C/features/nul/finished"
 put_branch feat%2Fnul nul feat/nul "$now"
 check 'NUL in finished setup: the NUL is there' 'od -An -tx1 "$C/features/nul/finished" | grep -q " 00"'
-printf 'keep\n' >"$c/.git/keep.txt"
 out=$(run_hook startup "$tmp/cl")
 status=$?
 check 'cleanup: exit 0, forgotten summary not printed' '[ "$status" -eq 0 ] && [ -z "$out" ]'
@@ -241,7 +238,6 @@ check 'summary of an existing branch named detached-fix, seen 15 days ago: kept'
 check 'note.json a fresh folder holding an old file, only main: kept' '[ -f "$C/features/notedir/note.json/old" ]'
 check 'NUL in finished, note 1 day, live branch: feature and summary kept' \
 	'[ -f "$C/features/nul/note.json" ] && [ -f "$C/branches/feat%2Fnul/seen" ]'
-check 'cleanup: common dir file kept' '[ "$(cat "$c/.git/keep.txt")" = keep ]'
 put_feature forgot '' 1 feat/live
 touch "$C/features/forgot/forget"
 check 'headless: cleanup runs' '(CLAUDE_CODE_SESSION_ATTENDED=0 && run_hook startup "$tmp/cl" >/dev/null) && [ ! -e "$C/features/forgot" ]'

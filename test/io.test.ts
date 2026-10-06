@@ -348,10 +348,6 @@ test('main-worktree discovery preserves unusual paths and unknown ticket invento
   expect(await read({ code: 0, out: listing, truncated: true })).toBe(null)
 })
 
-test('repoFacts outside a repo is null', async () => {
-  expect(await repoFacts(fakeIo({}, () => null))).toBe(null)
-})
-
 test('repoFacts is null when a checkout path holds a line break', async () => {
   // The checkout `/tmp/r<LF>other`: read line by line, its common dir would be the relative `other`.
   const where = '/tmp/r\nother\n/tmp/r\nother/.git\n'

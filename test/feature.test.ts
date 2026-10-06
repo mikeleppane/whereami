@@ -1,5 +1,5 @@
 import { expect, test } from 'claude-code/testing'
-import { classifyDoc, docFromArgs, featureIdFor, resolveFeature, uniqueId } from '../src/feature'
+import { classifyDoc, docFromArgs, resolveFeature } from '../src/feature'
 import type { DocRef, IdentityInput, NoteRef } from '../src/feature'
 
 const SPEC = 'docs/superpowers/specs/2026-10-05-auth-design.md'
@@ -49,23 +49,6 @@ test('classifyDoc makes ./ and absolute paths repo-relative and rejects other fi
       null,
     )
   }
-})
-
-test('featureIdFor strips the date and -design, and uses the Matt folder', () => {
-  expect(featureIdFor(spec('docs/superpowers/specs/2026-10-05-auth-refresh-design.md'))).toBe(
-    'auth-refresh',
-  )
-  const ticket = classifyDoc('.scratch/billing/issues/01-x.md', '/r')
-  expect(ticket).toEqual({
-    kind: 'matt-ticket',
-    path: '.scratch/billing/issues/01-x.md',
-    folder: '.scratch/billing',
-  })
-  expect(ticket && featureIdFor(ticket)).toBe('billing')
-})
-
-test('uniqueId counts up past taken ids', () => {
-  expect(uniqueId('auth', ['auth', 'auth-2'])).toBe('auth-3')
 })
 
 test('docFromArgs reads a quoted path only for library skills', () => {
@@ -272,6 +255,13 @@ test('a note unlinked from the branch drops out even when commits touch its docs
 test('committed docs with no note start a feature', () => {
   const result = resolveFeature(input({ commitDocs: [spec(SPEC), plan(PLAN)] }))
   expect(result).toEqual({ kind: 'one', id: 'auth', weak: false, create: spec(SPEC) })
+  const matt = classifyDoc('.scratch/ä/spec.md', '/r')
+  expect(matt && resolveFeature(input({ commitDocs: [matt] }))).toEqual({
+    kind: 'one',
+    id: 'ä',
+    weak: false,
+    create: { kind: 'matt-spec', path: '.scratch/ä/spec.md', folder: '.scratch/ä' },
+  })
 })
 
 test('no evidence resolves to none', () => {

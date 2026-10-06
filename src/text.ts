@@ -4,8 +4,6 @@ import type { FeatureState, Headline, NextAction } from './next'
 import type { SpResult } from './superpowers'
 import type { Docs, ItemStatus } from './types'
 
-export { hhmm } from './matt'
-
 // branch: null is a confirmed detached HEAD, undefined a branch git could not tell. noCommits: the repo has no
 // commits yet, named instead of the branch. merged: a claim apart from the phase; 'unknown' is shown as such.
 export type View =

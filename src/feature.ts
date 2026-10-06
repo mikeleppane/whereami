@@ -89,13 +89,13 @@ export function classifyDoc(path: string, repoRoot: string, cwd?: string): DocRe
   )
 }
 
-export function featureIdFor(doc: DocRef): string {
+function featureIdFor(doc: DocRef): string {
   if (doc.folder !== undefined) return doc.folder.slice('.scratch/'.length)
   const name = doc.path.slice(doc.path.lastIndexOf('/') + 1, -'.md'.length)
   return name.replace(/^\d{4}-\d{2}-\d{2}-/, '').replace(/-design$/, '')
 }
 
-export function uniqueId(base: string, taken: string[]): string {
+function uniqueId(base: string, taken: string[]): string {
   if (!taken.includes(base)) return base
   let n = 2
   while (taken.includes(`${base}-${n}`)) n++

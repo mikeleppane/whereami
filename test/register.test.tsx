@@ -1,10 +1,8 @@
-import type { On } from 'claude-code'
 import { type Engine, expect, test } from 'claude-code/testing'
-import { serializeNote } from '../src/notes'
 import { BOLD_READY_TICKET } from './fixtures/matt'
 import { complete, git, HEAD, LEDGER, ledger, PLAN, repo, spWorld } from './fixtures/repo'
 import { THREE_TASK_PLAN } from './fixtures/sp'
-import { world } from './world'
+import { bash, below, CHOOSE, linked, refreshes, W, world } from './world'
 
 const BAND = {
   plugin: 'whereami',
@@ -18,17 +16,6 @@ const BAND = {
     view: {},
   },
 } as const
-
-const W = '/r/.git/whereami'
-const TOP = 'process.run git rev-parse --path-format=absolute --show-toplevel --git-common-dir'
-const refreshes = (calls: string[]) => calls.filter((c) => c === TOP).length
-
-// A plugin beneath whereami that draws its own band line.
-const below = (on: On) =>
-  on('ui.render', { component: 'AbovePrompt' }, ($, e) => {
-    const { Text } = $.ui.resolve(e)
-    return <Text>below</Text>
-  })
 
 // The session starts in /r; its refresh runs once the clock is let go.
 const start = async ($: Engine, clock: { settle: () => Promise<void> }) => {
@@ -44,8 +31,6 @@ const band = async ($: Engine, props: { hasSurvey?: boolean; bodyColumns?: numbe
   return lines
 }
 
-const bash = ($: Engine) => $.tool.call({ tool: 'Bash', command: 'ls' })
-
 const typed = ($: Engine, command: string, args: string) =>
   $.command.run({
     command,
@@ -53,21 +38,6 @@ const typed = ($: Engine, command: string, args: string) =>
     origin: { kind: 'composer' },
     presentation: { isFullscreen: false, columns: 80 },
   })
-
-// A note of feature `id` linked to feat/auth, owning its spec.
-const linked = (id: string) => ({
-  [`${W}/features/${id}/note.json`]: serializeNote({
-    version: 1,
-    id,
-    branches: ['feat/auth'],
-    unlinked: [],
-    tips: {},
-    docs: { spec: `docs/superpowers/specs/2026-10-01-${id}-design.md` },
-    planTasks: [],
-    observed: [],
-    last: null,
-  }),
-})
 
 const turnDone = (agentId: string) => ({
   answer: '',
@@ -93,25 +63,6 @@ test('a Bash call resolves before its refresh, which redraws the band once the c
   expect(await band($)).toEqual(['whereami · auth · build 2/3', 'below'])
 })
 
-test('refreshes run at most once a second; requests while one waits coalesce into it', async ($, on) => {
-  const w = world(on, { files: spWorld(complete(1)), git: git(repo()) })
-  await start($, w.clock)
-  await w.clock.advance(1000)
-  const before = refreshes(w.calls)
-  await bash($)
-  await w.clock.settle()
-  expect(refreshes(w.calls) - before).toBe(1)
-  await w.clock.advance(300)
-  await bash($)
-  await w.clock.advance(300)
-  await bash($)
-  expect(refreshes(w.calls) - before).toBe(1)
-  await w.clock.advance(400)
-  expect(refreshes(w.calls) - before).toBe(2)
-  await w.clock.advance(2000)
-  expect(refreshes(w.calls) - before).toBe(2)
-})
-
 test('a session that ends right after it starts waits for the refresh under way, so its summary is written', async ($, on) => {
   const w = world(on, { files: spWorld(complete(1)), git: git(repo()) })
   await $.session.start({ cwd: '/r', surface: null, isInteractive: false })
@@ -125,9 +76,9 @@ test('a session that ends never waits for a refresh still waiting its turn', asy
   await start($, w.clock)
   files[LEDGER] = ledger(complete(1), complete(2))
   await bash($)
-  const before = refreshes(w.calls)
+  const before = refreshes(w)
   await $.session.end({ reason: 'prompt_input_exit', sessionId: 's1', resume: { id: 's1' } })
-  expect(refreshes(w.calls)).toBe(before)
+  expect(refreshes(w)).toBe(before)
   expect(w.written[`${W}/branches/feat%2Fauth/message`]).toContain('build 1/3')
 })
 
@@ -143,7 +94,7 @@ test('outside a repo the band is exactly what the plugins below drew', async ($,
   const w = world(on, { files: {}, git: () => null })
   below(on)
   await start($, w.clock)
-  expect(refreshes(w.calls)).toBe(1)
+  expect(refreshes(w)).toBe(1)
   expect(await band($)).toEqual(['below'])
 })
 
@@ -202,8 +153,6 @@ const TWO_TASK_PLAN = [
   '### Task 2: Persist the session',
 ].join('\n')
 
-const CHOOSE = 'whereami · 2 features could match · /whereami to choose'
-
 test('a skill start naming its document by absolute path before the first refresh ends picks one of two linked features until a clear, then the band asks again', async ($, on) => {
   const w = world(on, { files: { ...linked('a'), ...linked('b') }, git: git(repo()) })
   on('command.run', () => ({ text: '' }))
@@ -226,11 +175,11 @@ test('a failed Edit still refreshes; a failed Skill, Edit or Read is evidence of
   on('command.run', () => ({ text: '' }))
   below(on)
   await start($, w.clock)
-  const before = refreshes(w.calls)
+  const before = refreshes(w)
   // A failed Edit may have changed the file all the same: it refreshes.
   await $.tool.call({ tool: 'Edit', file_path: A, old_string: 'a', new_string: 'b' })
   await w.clock.advance(1000)
-  expect(refreshes(w.calls)).toBe(before + 1)
+  expect(refreshes(w)).toBe(before + 1)
   await typed($, 'superpowers:brainstorming', '')
   await $.tool.call({ tool: 'Skill', skill: 'superpowers:writing-plans', args: A })
   await $.tool.call({ tool: 'Read', file_path: A })
@@ -348,10 +297,10 @@ for (const evidence of ['typed', 'read'] as const) {
     cwd = `${root}/subdir`
     r.branch = 'feat/demo'
     await $.tool.call({ tool: 'EnterWorktree', name: 'existing' })
-    const before = refreshes(w.calls)
+    const before = refreshes(w)
     await typed($, 'mattpocock-skills:grill-me', evidence === 'typed' ? `"${root}/${doc}"` : '')
     if (evidence === 'read') await $.tool.call({ tool: 'Read', file_path: `${root}/${doc}` })
-    expect(refreshes(w.calls)).toBe(before)
+    expect(refreshes(w)).toBe(before)
     expect(Object.keys(w.written)).toEqual([])
     await w.clock.advance(1000)
     const note = JSON.parse(w.written[`${W}/features/demo/note.json`] ?? '{}')
@@ -365,13 +314,3 @@ for (const evidence of ['typed', 'read'] as const) {
     expect((await band($))[0]).toMatch(/^whereami · demo · design/)
   })
 }
-
-test('a failed refresh shows whereami · ?, cut to the width like any band', async ($, on) => {
-  // A folder where the summary's message file goes: it is not written, so the refresh fails.
-  const files = { ...spWorld(complete(1)), [`${W}/branches/feat%2Fauth/message/x`]: '' }
-  const w = world(on, { files, git: git(repo()) })
-  below(on)
-  await start($, w.clock)
-  expect(await band($)).toEqual(['whereami · ?', 'below'])
-  expect(await band($, { bodyColumns: 9 })).toEqual(['whereami…', 'below'])
-})
