@@ -1,6 +1,6 @@
 import { expect, test } from 'claude-code/testing'
-import { parsePlan, readSuperpowers, repoRelative } from '../src/superpowers'
 import type { PlanInfo, SpInput, SpResult } from '../src/superpowers'
+import { parsePlan, readSuperpowers, repoRelative } from '../src/superpowers'
 import type { ReadOutcome } from '../src/types'
 import { REAL_LEDGER, THREE_TASK_PLAN } from './fixtures/sp'
 

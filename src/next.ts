@@ -1,5 +1,5 @@
-import { hhmm } from './matt'
 import type { MattResult } from './matt'
+import { hhmm } from './matt'
 import type { SpResult } from './superpowers'
 import type { ItemStatus, Phase, ReaderResult } from './types'
 

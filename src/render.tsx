@@ -6,7 +6,7 @@ import type {
   UiPressArgument,
 } from 'claude-code'
 import { WHY_TEXT } from './feature'
-import { bandText, cut, type View } from './text'
+import { bandText, cut, mergedLine, type View } from './text'
 import type { ItemStatus } from './types'
 
 // The elements the pane draws with: what `$.ui.resolve(e)` hands the caller. No `$` here: the engine never
@@ -28,7 +28,8 @@ function row(i: ItemStatus): string {
     ...(i.parked ? [`${i.parked} parked`] : []),
     ...(i.waitingOn?.length ? [`waiting on ${i.waitingOn.join(', ')}`] : []),
     ...(i.type ? [`type ${i.type}`] : []),
-    ...i.evidence.map((e) => `${e.strength}: ${e.text}`),
+    // The source (ledger path:line, ticket path, commit or `seen HH:MM`) is for the user, as the text is.
+    ...i.evidence.map((e) => `${e.strength}: ${e.text}${e.source === '' ? '' : ` (${e.source})`}`),
     ...(i.differsOn ?? []).map((b) => `differs on ${b}`),
   ].join(' · ')
 }
@@ -69,6 +70,7 @@ export function paneTree(
         r?.unsupported === undefined ? [] : [`${r.library}: unsupported format: ${r.unsupported}`],
       ),
       ...v.notices,
+      ...mergedLine(v),
     )
     if (v.next !== null)
       lines.push(

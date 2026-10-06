@@ -1,6 +1,6 @@
 import { expect, test } from 'claude-code/testing'
-import { classifyDoc, docFromArgs, resolveFeature } from '../src/feature'
 import type { DocRef, IdentityInput, NoteRef } from '../src/feature'
+import { classifyDoc, docFromArgs, resolveFeature } from '../src/feature'
 
 const SPEC = 'docs/superpowers/specs/2026-10-05-auth-design.md'
 const PLAN = 'docs/superpowers/plans/2026-10-05-auth.md'

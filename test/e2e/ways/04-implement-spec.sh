@@ -15,6 +15,8 @@ session "$REPO"
 say '/mattpocock-skills:implement-spec .scratch/demo/spec.md'
 wait_file "$B/agents" '^1 agents from before the clear are still running$'
 expect_screen 'whereami · demo · build 0/2 \? · 1 agents running( |$)'
+# The detail is written and names the running build, so the absence below is not an empty or missing file.
+expect_file "$B/detail" 'note: \\"implement-spec started [0-9]{2}:[0-9]{2}; ticket statuses update at its end\\"'
 ! grep -q 'next: /' "$B/detail" || fail "the summary drafts a command: $(cat "$B/detail")"
 
 send /clear

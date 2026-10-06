@@ -20,8 +20,6 @@ say 'build the plan'
 wait_file "$W/branches/feat%2Fdemo/message" 'build 1/3 recorded complete$'
 set -- "$W"/features/*
 [ "$*" = "$W/features/demo" ] || fail "features: $*, expected demo alone"
-expect_file "$W/features/demo/note.json" "\"spec\": \"$SPEC\""
-expect_file "$W/features/demo/note.json" "\"plan\": \"$PLAN\""
 
 send /whereami
 for p in 'whereami · demo · build 1/3 ' "spec: $SPEC " "plan: $PLAN "; do

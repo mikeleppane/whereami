@@ -1,4 +1,4 @@
-import type { Evidence, ItemStatus, ItemState, Observed, ReaderResult } from './types'
+import type { Evidence, ItemState, ItemStatus, Observed, ReaderResult } from './types'
 
 export type Ticket = {
   key: string

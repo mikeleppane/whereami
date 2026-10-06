@@ -1,4 +1,4 @@
-import type { ItemStatus, LastSeen, ReadOutcome, ReaderResult } from './types'
+import type { ItemStatus, LastSeen, ReaderResult, ReadOutcome } from './types'
 
 export type PlanInfo = { tasks: { n: number; title: string }[]; spec?: string }
 export type Ledger = { plan: string; lines: string[] }

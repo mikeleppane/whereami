@@ -61,6 +61,17 @@ silent() {
 on_branch "$tmp/repo" 'feat/ä-x'
 check 'branch feat/ä-x' 'printed "$tmp/repo" "whereami · demo · design"'
 
+# keyed DIR BRANCH: a session on BRANCH writes its summary under BRANCH's key in test/fixtures/keys.ts, the list the
+# mod and the hook are each tested against, and the hook prints it.
+keyed() {
+	on_branch "$1" "$2"
+	k_key=$(awk -F"'" -v n="$2" '$2 == n { print $4 }' "$ROOT/test/fixtures/keys.ts")
+	[ -n "$k_key" ] && printed "$1" "whereami · demo · design" &&
+		[ -f "$1/.git/whereami/branches/$k_key/seen" ]
+}
+check 'branch 100%' 'keyed "$tmp/percent" "100%"'
+check 'branch fix/🐛' 'keyed "$tmp/emoji" "fix/🐛"'
+
 on_branch "$tmp/base" feat/wt
 git -C "$tmp/base" worktree add -q --detach "$tmp/my repo" feat/wt || die 'worktree in my repo'
 check 'detached worktree in my repo' 'printed "$tmp/my repo" "whereami · demo · detached HEAD · design"'

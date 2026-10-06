@@ -380,22 +380,27 @@ async function forget($: EngineInterface): Promise<string | null> {
   return id
 }
 
-// Spec section 7 "Drafting": only a box holding exactly '' is filled; the user's text is never touched and
-// nothing is submitted. Returns the notice to show, null when the command is in the box.
+// Spec section 7 "Drafting": only a box holding exactly '' is filled, appended to so a key typed since the read
+// is never overwritten; nothing is submitted. Returns the notice to show, null when the command is in the box.
 async function draft($: EngineInterface, command: string, surface: RenderSurface) {
   const box = await $.prompt.read().catch(() => null)
-  let refused = false
-  if (box?.text === '') {
-    const r = await $.prompt.fill({ text: command }).catch(() => ({ isFilled: false as const }))
+  let why = 'your prompt has text, so the command was copied instead'
+  if (box === null) why = 'copied: the prompt box could not be read'
+  else if (box.text === '') {
+    const r = await $.prompt
+      .fill({ text: command, mode: 'append' })
+      .catch(() => ({ isFilled: false as const }))
     if (r.isFilled) return null
-    if ('refusal' in r && r.refusal === 'dialog') return 'close the dialog, then press Draft again'
-    refused = true
+    const refusal = 'refusal' in r ? r.refusal : undefined
+    if (refusal === 'dialog') return 'close the dialog, then press Draft again'
+    // A hook's refusal carries no reason: its cause is unknown, not a missing box.
+    why =
+      refusal === 'no_composer'
+        ? 'copied: this window has no prompt box'
+        : 'copied: the prompt box did not take the command'
   }
   const copied = await $.ui.copy({ text: command, surface }).catch(() => ({ isCopied: false }))
-  if (!copied.isCopied) return `copy this command: ${command}`
-  return refused
-    ? 'copied: this window has no prompt box'
-    : 'your prompt has text, so the command was copied instead'
+  return copied.isCopied ? why : `copy this command: ${command}`
 }
 
 function sameAction(p: UiPressArgument, shown: View | null, at: RepoFacts | null): boolean {

@@ -1,5 +1,5 @@
 import { expect, test } from 'claude-code/testing'
-import { branchFiles, parseNote, paths, serializeNote } from '../src/notes'
+import { branchFiles, parseForget, parseNote, paths, serializeNote } from '../src/notes'
 import type { Note } from '../src/types'
 
 const NOTE: Note = {
@@ -62,6 +62,28 @@ test('parseNote fills fields left out', () => {
     observed: [],
     last: null,
   })
+})
+
+// A marker that cannot name what it owns is unknown ownership (null), never an empty set to delete by.
+test('parseForget reads a version 1 marker and rejects every other shape', () => {
+  const marker = (fields: object) => JSON.stringify({ version: 1, id: 'auth', ...fields })
+  expect(parseForget(marker({ documents: ['docs/a.md'] }))).toEqual({
+    id: 'auth',
+    documents: ['docs/a.md'],
+  })
+  for (const text of [
+    '',
+    'forget\n',
+    '{"version":1,',
+    marker({ version: 2, documents: ['docs/a.md'] }),
+    JSON.stringify({ version: 1, documents: ['docs/a.md'] }),
+    marker({ id: '', documents: ['docs/a.md'] }),
+    marker({ documents: [] }),
+    marker({ documents: ['  '] }),
+    marker({ documents: [1] }),
+    marker({ documents: 'docs/a.md' }),
+  ])
+    expect([text, parseForget(text)]).toEqual([text, null])
 })
 
 test('branchFiles writes message as one JSON string line and a dot line', () => {

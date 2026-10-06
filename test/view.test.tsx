@@ -1,5 +1,6 @@
 import type { On } from 'claude-code'
 import { type Engine, expect, type MockClock, test } from 'claude-code/testing'
+import { BOLD_READY_TICKET } from './fixtures/matt'
 import { complete, git, LEDGER, ledger, PLAN, repo, spWorld } from './fixtures/repo'
 import { bash, below, CHOOSE, linked, NOW, onPath, refreshes, TOP, W, world } from './world'
 
@@ -7,6 +8,8 @@ const BUILD = 'superpowers:subagent-driven-development'
 const COMMAND = `/${BUILD} ${PLAN}`
 const SPEC = 'docs/superpowers/specs/2026-10-05-auth-design.md'
 const SURFACES = ['terminal', 'desktop'] as const
+const SCRATCH = '.scratch/demo'
+const TICKET = `${SCRATCH}/issues/01-t.md`
 
 const PANE = {
   plugin: 'whereami',
@@ -139,7 +142,8 @@ test('Draft fills an empty prompt box with the command and copies nothing', asyn
     const before = w.calls.length
     await p.press('draft')
     const calls = w.calls.slice(before)
-    expect(calls).toContain(`prompt.fill ${COMMAND}`)
+    // Appended to the box read as empty: a key typed since the read is never overwritten.
+    expect(calls).toContain(`prompt.fill append ${COMMAND}`)
     expect(calls.filter((c) => c.startsWith('ui.copy'))).toEqual([])
     await p.ui.unmount()
   }
@@ -162,6 +166,7 @@ for (const prompt of ['draft test', '   '])
     }
   })
 
+// A hook's refusal carries no reason, so its cause is unknown: not "no prompt box" (that is `no_composer`).
 test('a fill refused with no reason copies the command instead and says why', async ($, on) => {
   const seen = copies(on)
   on('prompt.fill', { text: COMMAND }, () => ({ isFilled: false }))
@@ -170,7 +175,7 @@ test('a fill refused with no reason copies the command instead and says why', as
     const p = await pane($, surface)
     await p.press('draft')
     expect(seen.at(-1)).toBe(`${surface} ${COMMAND}`)
-    expect(await p.lines()).toContain('copied: this window has no prompt box')
+    expect(await p.lines()).toContain('copied: the prompt box did not take the command')
     await p.ui.unmount()
   }
 })
@@ -631,9 +636,55 @@ test('/whereami answers ids, paths, counts and statuses; ledger text shows in th
   expect(lines).toContain('note: SECRET-NOTE')
 })
 
+// Spec sections 2 and 7: each status names its evidence, a ledger path:line or a ticket path.
+for (const [kind, opts, row] of [
+  [
+    'ledger line',
+    {},
+    'Task 1 Add token store · complete · reviewed · recorded: commits a..b, review clean (.superpowers/sdd/auth/progress.md:2)',
+  ],
+  [
+    'ticket path',
+    {
+      files: { [`/r/${SCRATCH}/spec.md`]: '# S', [`/r/${TICKET}`]: BOLD_READY_TICKET },
+      mtimes: { [`/r/${SCRATCH}/spec.md`]: NOW },
+    },
+    `01 Add token store · open · recorded: Status: ready-for-agent (${TICKET})`,
+  ],
+] as const)
+  test(`each status in the pane names its evidence: ${kind}`, async ($, on) => {
+    await started($, on, opts)
+    for (const surface of SURFACES) {
+      const p = await pane($, surface)
+      expect(await p.lines()).toContain(row)
+      await p.ui.unmount()
+    }
+  })
+
+// Spec section 5: a squash merge leaves no trace, so the pane says merged is unknown, never "not merged".
+test('after a squash merge the pane says merged is unknown', async ($, on) => {
+  const files = spWorld(complete(1), complete(2), complete(3))
+  const r = repo({ log: `\0${'d'.repeat(40)}\tplan\0\n${PLAN}\0` })
+  const w = world(on, { files, git: git(r) })
+  await $.session.start({ cwd: '/r', surface: 'terminal', isInteractive: true })
+  await w.clock.settle()
+  delete files[LEDGER]
+  Object.assign(r, { deleted: true, branch: null })
+  await bash($)
+  await w.clock.advance(1000)
+  for (const surface of SURFACES) {
+    const p = await pane($, surface)
+    const lines = await p.lines()
+    expect(lines[0]).toBe('whereami · auth · detached HEAD · done 3/3')
+    expect(lines).toContain('merged: unknown')
+    await p.ui.unmount()
+  }
+})
+
 for (const [damage, body, diagnostic] of [
   ['invalid header', 'SECRET-HEADER', 'not a Superpowers ledger'],
   ['oversized ledger', 'x'.repeat(1048577), 'file over 1 MB or not text'],
+  ['binary ledger', 'a\0b', 'file over 1 MB or not text'],
 ] as const)
   test(`an already-linked feature shows its ${damage} diagnostic in the pane only`, async ($, on) => {
     const files = spWorld(complete(1))

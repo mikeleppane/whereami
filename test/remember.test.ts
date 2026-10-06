@@ -1,8 +1,8 @@
 import { expect, test } from 'claude-code/testing'
-import { remember } from '../src/remember'
-import { readSuperpowers } from '../src/superpowers'
 import type { RememberInput } from '../src/remember'
+import { remember } from '../src/remember'
 import type { SpResult } from '../src/superpowers'
+import { readSuperpowers } from '../src/superpowers'
 import type { Note, Observed } from '../src/types'
 
 const NOW = new Date('2026-10-06T12:34:56.000Z')

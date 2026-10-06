@@ -94,7 +94,7 @@ function docsLine(docs: Docs): string[] {
 }
 
 // A squash merge leaves no trace: unknown is said, never shown as "not merged" (spec section 5).
-const mergedLine = (v: FeatureView) => (v.merged === 'unknown' ? ['merged: unknown'] : [])
+export const mergedLine = (v: FeatureView) => (v.merged === 'unknown' ? ['merged: unknown'] : [])
 
 // Observed or related evidence on the item: its status is marked `?`, whatever the headline says.
 const weak = (i: ItemStatus) =>

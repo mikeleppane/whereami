@@ -54,7 +54,8 @@ export const linked = (id: string, branches = ['feat/auth']) => ({
 // list is denied, as under `claude -p`), installed commands and the prompt box. Writes land in `files` too, so
 // the next refresh reads them. A file or folder changed at 0 unless `mtimes` says when; the clock starts at NOW, so only a
 // file `mtimes` dates later was written in the session. `calls` records each answered op in order:
-// `<op> <its path, argv or text>`. `cwd` can follow a worktree move; otherwise it is the start directory.
+// `<op> <its path, argv or text>`, a fill's mode before its text. `cwd` can follow a worktree move; otherwise it
+// is the start directory.
 export function world(
   on: On,
   opts: {
@@ -176,7 +177,7 @@ export function world(
     return { value: { text, cursor: text.length } }
   })
   on('prompt.fill', (_, e) => {
-    calls.push(`prompt.fill ${e.text}`)
+    calls.push(`prompt.fill ${e.mode} ${e.text}`)
     return { isFilled: true }
   })
   on('ui.copy', (_, e) => {
