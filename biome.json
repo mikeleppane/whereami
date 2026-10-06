@@ -12,6 +12,7 @@
       "semicolons": "asNeeded"
     }
   },
+  "plugins": ["./biome/unknown-not-absent.grit"],
   "linter": {
     "enabled": true,
     "rules": {

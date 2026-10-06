@@ -22,6 +22,7 @@ const PLACE = /^((?:\/|[A-Za-z]:\/).*)\/whereami\/(?:branches|features)\/[^/]+\/
 // Where path lands, every link followed; for a path not there yet, where its nearest existing folder lands
 // plus the rest. Null when that cannot be told (a stat that fails on a path that exists).
 async function land($: EngineInterface, path: string): Promise<string | null> {
+  // biome-ignore lint/plugin: absence is confirmed by $.fs.exists below; a path that exists but fails stat returns null
   const stat = await $.fs.stat(path, { resolve: true }).catch(() => null)
   if (stat !== null) return stat.realPath?.replace(/\\/g, '/').replace(/\/$/, '') ?? null
   const cut = path.lastIndexOf('/')
@@ -41,6 +42,7 @@ async function misplaced($: EngineInterface, path: string): Promise<string | nul
   const dir = await land($, path.slice(0, path.lastIndexOf('/')))
   if (top === null || dir === null || !dir.startsWith(`${top}/whereami/`))
     return `lands outside whereami/: ${dir}`
+  // biome-ignore lint/plugin: a failed stat on a path that exists refuses the write as not a plain file
   const own = await $.fs.stat(path).catch(() => null)
   if (own === null ? await $.fs.exists(path) : own.isLink || own.kind !== 'file')
     return 'not a plain file'
@@ -71,6 +73,7 @@ function makeIo($: EngineInterface, cwd: string): Io {
     },
     read: async (path) => {
       // A failed stat is missing only when the path is confirmed absent; a denied or failed look is unreadable.
+      // biome-ignore lint/plugin: absence is confirmed by $.fs.exists below; otherwise the read is an error
       const stat = await $.fs.stat(path).catch(() => null)
       if (stat === null)
         return (await $.fs.exists(path).catch(() => true))
@@ -383,6 +386,7 @@ async function forget($: EngineInterface): Promise<string | null> {
 // Spec section 7 "Drafting": only a box holding exactly '' is filled, appended to so a key typed since the read
 // is never overwritten; nothing is submitted. Returns the notice to show, null when the command is in the box.
 async function draft($: EngineInterface, command: string, surface: RenderSurface) {
+  // biome-ignore lint/plugin: null is reported as an unreadable box, never as an empty one
   const box = await $.prompt.read().catch(() => null)
   let why = 'your prompt has text, so the command was copied instead'
   if (box === null) why = 'copied: the prompt box could not be read'

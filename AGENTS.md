@@ -34,6 +34,7 @@ Single-context: one `GLOSSARY.md` and `docs/adr/` at the repo root. See `docs/ag
 - Keep `hooks/session-start.sh` POSIX `sh`: no `jq` or bash-specific syntax, and always `exit 0`. It deletes only below an absolute path ending in `/whereami`.
 - Branch and feature keys encode every byte outside `[A-Za-z0-9._-]` as uppercase `%XX` in both TypeScript and the hook; `test/fixtures/keys.ts` is the shared test list. Do not let the two implementations diverge.
 - Keep the established limits: 14 days is `1209600` seconds, file reads cap at `1048576` bytes, and refreshes are throttled to `1000` ms. Running agents have status `pending`, `running` or `waiting`; finished agents have status `completed`, `failed` or `killed`.
+- A failed read, stat, list or Git call is unknown, never absent or empty: confirm absence before treating it as absent. `biome/unknown-not-absent.grit` flags `.catch(() => null)` and its kin; a confirmed site carries a `biome-ignore lint/plugin` comment saying how absence is confirmed.
 - `$.process.run` caps stdout at 4 MiB; never parse truncated output as complete evidence. Do not call `$.session.usage({ breakdown: 'full' })`.
 - The source layout intentionally splits spec section 2's `src/render.ts` into `src/text.ts` and `src/render.tsx`, and `src/refresh.ts` into `src/gather.ts` and `src/refresh.ts`.
 - Keep public files free of personal paths and secrets.

@@ -1,0 +1,13 @@
+language js
+
+// A failed read, stat, list or git call is unknown, never absent or empty (AGENTS.md hard rules).
+`$call.catch(() => $value)` where {
+  $value <: or {
+    `null`,
+    `[]`,
+    `false`,
+    `0`,
+    `''`
+  },
+  register_diagnostic(span=$value, message="A rejection turned into an empty value reads as absence. Keep it unknown, or confirm absence and say why in a biome-ignore comment.")
+}
