@@ -258,6 +258,8 @@ done
 exec "$REAL_OD" "$@"
 SH
 chmod +x "$tmp/scanner-bin/od"
+# The hook names the file by git's spelling of the common dir: links resolved (macOS /var is /private/var), a drive on Windows.
+scan_file=$(git -C "$c" rev-parse --path-format=absolute --git-common-dir)/whereami/features/scan/finished
 for scan_mode in empty partial; do
 	put_feature scan '' 1 feat/live
 	printf '1\000\n' >"$C/features/scan/finished"
@@ -266,14 +268,14 @@ for scan_mode in empty partial; do
 	put_branch feat%2Fscan-control scan-control feat/scan-control "$now"
 	check "scanner $scan_mode setup: fails while cat reads the NUL file" '(
 		export PATH="$tmp/scanner-bin:$tool_path" REAL_OD="$real_od" SCAN_MODE="$scan_mode"
-		export SCAN_FILE="$C/features/scan/finished" SCAN_LOG="$tmp/scan.log"
+		export SCAN_FILE="$scan_file" SCAN_LOG="$tmp/scan.log"
 		od -An -v -tx1 "$SCAN_FILE" >/dev/null
 		[ "$?" -eq 2 ] && cat "$SCAN_FILE" >"$tmp/scan-copy" &&
 			cmp "$SCAN_FILE" "$tmp/scan-copy" && "$REAL_OD" -An -v -tx1 "$tmp/scan-copy" | grep -q " 00"
 	)'
 	out=$(
 		export PATH="$tmp/scanner-bin:$tool_path" REAL_OD="$real_od" SCAN_MODE="$scan_mode"
-		export SCAN_FILE="$C/features/scan/finished" SCAN_LOG="$tmp/scan.log"
+		export SCAN_FILE="$scan_file" SCAN_LOG="$tmp/scan.log"
 		: >"$SCAN_LOG"
 		run_hook startup "$tmp/cl"
 	)

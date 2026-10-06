@@ -8,6 +8,16 @@ export const NOW = Date.UTC(2026, 9, 6)
 
 export const W = '/r/.git/whereami'
 
+// An fs event's path as the worlds here spell it. The engine anchors it with the host's path.resolve before any
+// hook sees it, so on Windows `/r/x` arrives as `D:\r\x`; these worlds are POSIX.
+export const posix = (path: string) => path.replace(/^[A-Za-z]:(?=\\)/, '').replace(/\\/g, '/')
+
+// A matcher for fs events on `path`, in either spelling.
+export const onPath = (path: string) =>
+  new RegExp(
+    `^(?:[A-Za-z]:)?${path.replace(/[.*+?^${}()|[\]\\]/g, '\\$&').replace(/\//g, '[\\\\/]')}$`,
+  )
+
 // Every refresh starts with this git call: the count of refreshes run so far.
 export const TOP =
   'process.run git rev-parse --path-format=absolute --show-toplevel --git-common-dir'
@@ -77,37 +87,42 @@ export function world(
   const missing = (path: string) => ({ deny: `no such file: ${path}` })
 
   on('fs.read', (_, e) => {
-    calls.push(`fs.read ${e.path}`)
-    const text = files[e.path]
-    return text === undefined ? missing(e.path) : { value: text }
+    const path = posix(e.path)
+    calls.push(`fs.read ${path}`)
+    const text = files[path]
+    return text === undefined ? missing(path) : { value: text }
   })
   on('fs.write', (_, e) => {
-    calls.push(`fs.write ${e.path}`)
-    files[e.path] = e.text
-    written[e.path] = e.text
+    const path = posix(e.path)
+    calls.push(`fs.write ${path}`)
+    files[path] = e.text
+    written[path] = e.text
     return { value: undefined }
   })
   on('fs.list', (_, e) => {
-    calls.push(`fs.list ${e.path}`)
-    if (!isDir(e.path)) return missing(e.path)
+    const path = posix(e.path)
+    calls.push(`fs.list ${path}`)
+    if (!isDir(path)) return missing(path)
     const names = Object.keys(files)
-      .filter((p) => p.startsWith(`${e.path}/`))
-      .map((p) => p.slice(e.path.length + 1).replace(/\/.*/, ''))
+      .filter((p) => p.startsWith(`${path}/`))
+      .map((p) => p.slice(path.length + 1).replace(/\/.*/, ''))
     return {
       value: [...new Set(names)].map((name) => {
-        const s = stat(`${e.path}/${name}`) ?? { kind: 'file' as const, size: 0, mtimeMs: 0 }
+        const s = stat(`${path}/${name}`) ?? { kind: 'file' as const, size: 0, mtimeMs: 0 }
         return { name, ...s, isLink: false }
       }),
     }
   })
   on('fs.exists', (_, e) => {
-    calls.push(`fs.exists ${e.path}`)
-    return { value: stat(e.path) !== null }
+    const path = posix(e.path)
+    calls.push(`fs.exists ${path}`)
+    return { value: stat(path) !== null }
   })
   on('fs.stat', (_, e) => {
-    calls.push(`fs.stat ${e.path}`)
-    const s = stat(e.path)
-    return s === null ? missing(e.path) : { value: e.resolve ? { ...s, realPath: e.path } : s }
+    const path = posix(e.path)
+    calls.push(`fs.stat ${path}`)
+    const s = stat(path)
+    return s === null ? missing(path) : { value: e.resolve ? { ...s, realPath: path } : s }
   })
   on('process.run', (_, e) => {
     calls.push(`process.run ${e.argv.join(' ')}`)

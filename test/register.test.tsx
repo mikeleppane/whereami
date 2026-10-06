@@ -2,7 +2,7 @@ import { type Engine, expect, test } from 'claude-code/testing'
 import { BOLD_READY_TICKET } from './fixtures/matt'
 import { complete, git, HEAD, LEDGER, ledger, PLAN, repo, spWorld } from './fixtures/repo'
 import { THREE_TASK_PLAN } from './fixtures/sp'
-import { bash, below, CHOOSE, linked, refreshes, W, world } from './world'
+import { bash, below, CHOOSE, linked, onPath, refreshes, W, world } from './world'
 
 const BAND = {
   plugin: 'whereami',
@@ -243,7 +243,7 @@ test('a denied discovery inspection reports unknown instead of persisting partia
   const mtimes: Record<string, number> = {}
   const logged: string[] = []
   let deny = true
-  on('fs.stat', { path: B }, async (_, e, next) => {
+  on('fs.stat', { path: onPath(B) }, async (_, e, next) => {
     if (deny) return { deny: 'EACCES' }
     return next(e)
   })

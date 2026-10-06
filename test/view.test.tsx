@@ -1,7 +1,7 @@
 import type { On } from 'claude-code'
 import { type Engine, expect, type MockClock, test } from 'claude-code/testing'
 import { complete, git, LEDGER, ledger, PLAN, repo, spWorld } from './fixtures/repo'
-import { bash, below, CHOOSE, linked, NOW, refreshes, TOP, W, world } from './world'
+import { bash, below, CHOOSE, linked, NOW, onPath, refreshes, TOP, W, world } from './world'
 
 const BUILD = 'superpowers:subagent-driven-development'
 const COMMAND = `/${BUILD} ${PLAN}`
@@ -99,7 +99,7 @@ const gate = (on: On, path: string) => {
   const held = new Promise<void>((r) => {
     g.release = r
   })
-  on('fs.write', { path }, async (_, e, next) => {
+  on('fs.write', { path: onPath(path) }, async (_, e, next) => {
     if (g.deny) return { deny: 'refused' }
     if (g.hold) {
       g.hold = false
@@ -437,7 +437,7 @@ for (const reset of ['clear', 'start'] as const)
     test(`a ${pending} choice from before session ${reset} cannot override new recorded evidence`, async ($, on) => {
       below(on)
       const authLinks: string[][] = []
-      on('fs.write', { path: `${W}/features/auth/note.json` }, async (_, e, next) => {
+      on('fs.write', { path: onPath(`${W}/features/auth/note.json`) }, async (_, e, next) => {
         const result = await next(e)
         authLinks.push(JSON.parse(e.text).branches)
         return result

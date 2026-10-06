@@ -4,6 +4,7 @@ import { parseCatFileBatch, repoFacts } from '../src/io'
 import { refresh } from '../src/refresh'
 import type { GitResult, Note } from '../src/types'
 import { fakeIo } from './fake-io'
+import { posix } from './world'
 
 type World = {
   where?: string
@@ -415,10 +416,11 @@ async function startOn(
     const value = { exitCode: r.code, stdout: r.out, stderr: '' }
     return { value: { ...value, isStdoutTruncated: false, isStderrTruncated: false } }
   })
-  on('fs.exists', (_$, e) => ({ value: real(e.path) !== null }))
+  on('fs.exists', (_$, e) => ({ value: real(posix(e.path)) !== null }))
   on('fs.stat', (_$, e) => {
-    if (disk.unstat?.includes(e.path)) return { deny: 'EACCES' }
-    const w = walk(e.path)
+    const path = posix(e.path)
+    if (disk.unstat?.includes(path)) return { deny: 'EACCES' }
+    const w = walk(path)
     const kind = w === null ? undefined : find(w.at)?.kind
     if (w === null || kind === undefined) return { deny: 'ENOENT' }
     const isLink = w.node.to !== undefined
@@ -427,8 +429,9 @@ async function startOn(
     }
   })
   on('fs.list', (_$, e) => {
-    if (disk.unlist?.includes(e.path)) return { deny: 'EACCES' }
-    const dir = real(e.path)?.toLowerCase()
+    const path = posix(e.path)
+    if (disk.unlist?.includes(path)) return { deny: 'EACCES' }
+    const dir = real(path)?.toLowerCase()
     if (dir === undefined) return { deny: 'ENOENT' }
     const value = nodes
       .filter((n) => n.path.slice(0, n.path.lastIndexOf('/')).toLowerCase() === dir)
@@ -442,15 +445,17 @@ async function startOn(
     return { value }
   })
   on('fs.read', (_$, e) => {
-    if (disk.unread?.includes(e.path)) return { deny: 'EACCES' }
-    const at = real(e.path)
-    const found = Object.entries(text).find(([path]) => real(path) === at)
+    const path = posix(e.path)
+    if (disk.unread?.includes(path)) return { deny: 'EACCES' }
+    const at = real(path)
+    const found = Object.entries(text).find(([p]) => real(p) === at)
     return found === undefined ? { deny: 'ENOENT' } : { value: found[1] }
   })
   on('fs.write', (_$, e) => {
-    if (deny(e.path)) return { deny: 'read-only' }
-    written.push(e.path)
-    wrote[e.path] = e.text
+    const path = posix(e.path)
+    if (deny(path)) return { deny: 'read-only' }
+    written.push(path)
+    wrote[path] = e.text
     return { value: undefined }
   })
   on('ui.log', (_$, e) => {
