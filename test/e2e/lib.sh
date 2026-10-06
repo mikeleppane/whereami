@@ -80,13 +80,33 @@ mkrepo() {
 	fi
 }
 
-# claude_cmd: the pinned Claude Code command line with this plugin, the stand-ins and the fake server.
+# plan FILE SPEC: a three-task Superpowers plan (Task 1: One, 2: Two, 3: Three) at FILE whose **Spec:** names SPEC.
+plan() {
+	mkdir -p "${1%/*}" &&
+		printf '# Plan\n\n**Spec:** `%s`\n\n### Task 1: One\n\n### Task 2: Two\n\n### Task 3: Three\n' "$2" >"$1"
+}
+
+# matt_demo: branch feat/demo with Matt's .scratch/demo spec and ready tickets 01-t and 02-u committed.
+matt_demo() {
+	m_d=$REPO/.scratch/demo
+	if ! { git -C "$REPO" checkout -q -b feat/demo && mkdir -p "$m_d/issues" && printf '# Demo\n' >"$m_d/spec.md" &&
+		printf '# T\n\nStatus: ready-for-agent\n' >"$m_d/issues/01-t.md" &&
+		printf '# U\n\nStatus: ready-for-agent\n' >"$m_d/issues/02-u.md" &&
+		git -C "$REPO" add .scratch && git -C "$REPO" commit -q -m 'spec and tickets'; }; then
+		fail 'matt_demo'
+	fi
+}
+
+# Plugins loaded after whereami, from test/e2e/plugins, in load order. Ways 11 and 12 change it.
+PLUGINS='superpowers mattpocock-skills'
+
+# claude_cmd: the pinned Claude Code command line with this plugin, then $PLUGINS, and the fake server.
 claude_cmd() {
 	printf 'env -i PATH=%s HOME=%s TERM=xterm-256color %s' "$(q "$PATH")" "$(q "$OUT/home")" "${TMPDIR:+TMPDIR=$(q "$TMPDIR") }"
 	printf 'ANTHROPIC_BASE_URL=http://127.0.0.1:%s ANTHROPIC_API_KEY=sk-fake ' "$PORT"
 	printf 'CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1 DISABLE_AUTOUPDATER=1 GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_NOSYSTEM=1 '
-	printf '%s --plugin-dir %s --plugin-dir %s --plugin-dir %s ' "$(q "$ROOT/node_modules/.bin/claude")" "$(q "$ROOT")" \
-		"$(q "$ROOT/test/e2e/plugins/superpowers")" "$(q "$ROOT/test/e2e/plugins/mattpocock-skills")"
+	printf '%s --plugin-dir %s ' "$(q "$ROOT/node_modules/.bin/claude")" "$(q "$ROOT")"
+	for c_p in $PLUGINS; do printf -- '--plugin-dir %s ' "$(q "$ROOT/test/e2e/plugins/$c_p")"; done
 	printf -- '--permission-mode default --allowedTools=Bash,Read,Write,Edit,Skill'
 }
 
@@ -118,10 +138,15 @@ send() {
 
 # say TEXT: sends TEXT, which starts a step of the way's script, then waits until that step has no turn left. Other
 # requests (titles, compaction) do not end the wait.
+# The wait names the step TEXT starts, as fake-api.mjs matches it: Claude Code may repeat an earlier step's last
+# request, and a wait that ended on it would type the next prompt into a running turn.
 say() {
 	s_n=$(wc -l <"$OUT/requests.jsonl")
+	s_step=$(node -e 'const [f, t] = process.argv.slice(1)
+const i = JSON.parse(require("fs").readFileSync(f, "utf8")).steps.findIndex((s) => t.includes(s.match))
+console.log(i < 0 ? "[0-9]+" : i)' "$ROOT/test/e2e/ways/$NAME.json" "$1")
 	send "$1"
-	poll 60 'tail -n +$((s_n + 1)) "$OUT/requests.jsonl" | grep -Eq "\"step\":[0-9]+,.*\"final\":true"' ||
+	poll 60 'tail -n +$((s_n + 1)) "$OUT/requests.jsonl" | grep -Eq "\"step\":$s_step,.*\"final\":true"' ||
 		fail "no answer to: $1"
 	SAID=$s_n
 }
@@ -145,6 +170,17 @@ expect_screen() {
 	poll 30 'screen | grep -Eq -- "$e_re"' || fail "screen never showed $1"
 }
 
+# pane: the side pane /whereami opens, right of the last │ on each screen line, its wrapped lines joined into one.
+pane() {
+	screen | sed -n 's/.*│//p' | tr -s ' \n' '  '
+}
+
+# expect_pane REGEX: the pane shows REGEX within 30 s.
+expect_pane() {
+	e_re=$1
+	poll 30 'pane | grep -Eq -- "$e_re"' || fail "the pane never showed $1"
+}
+
 # expect_file PATH REGEX: PATH holds a line matching REGEX.
 expect_file() {
 	grep -Eq -- "$2" "$1" 2>/dev/null || fail "$1 does not match $2"
@@ -153,6 +189,20 @@ expect_file() {
 # expect_request REGEX: a requests.jsonl line since the last say matches REGEX.
 expect_request() {
 	tail -n +$((SAID + 1)) "$OUT/requests.jsonl" | grep -Eq -- "$1" || fail "no request since the last say matches $1"
+}
+
+# record: how many times the newest prompt's request held the hook's record.
+record() {
+	grep '"turn":0,' "$OUT/requests.jsonl" | tail -n 1 | sed 's/.*"record":\([0-9]*\).*/\1/'
+}
+
+# started SOURCE REGEX [AT_LEAST]: says "where are we, SOURCE" (the way's step for it); the hook's summary for a
+# SOURCE start, matching REGEX, is then on screen, and the prompt's request holds the record AT_LEAST times (1).
+# Claude Code may draw a start's message only with the next prompt, so the prompt comes first.
+started() {
+	say "where are we, $1"
+	expect_screen "SessionStart:$1 says: $2"
+	[ "$(record)" -ge "${3:-1}" ] || fail "$1: the prompt's request holds the record $(record) times, expected ${3:-1}"
 }
 
 # end_way: quits a live session, then prints PASS NAME or FAIL NAME: WHY and exits; the EXIT trap stops tmux and the

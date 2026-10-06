@@ -17,7 +17,7 @@ for a; do
 	ways/*.sh) w=$a ;;
 	*)
 		w=
-		for f in ways/"$a"-*.sh ways/"$a".sh; do
+		for f in ways/"$a"-*.sh ways/0"$a"-*.sh ways/"$a".sh; do
 			if [ -f "$f" ]; then
 				w=$f
 				break

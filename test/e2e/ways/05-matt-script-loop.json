@@ -1,0 +1,36 @@
+{
+  "steps": [
+    {
+      "match": ".scratch/demo/issues/01-t.md",
+      "turns": [
+        [
+          {
+            "type": "tool_use",
+            "name": "Bash",
+            "input": {
+              "command": "printf 'store\\n' >store.txt && git add store.txt && git commit -q -m 'add the store'",
+              "description": "Commit the work"
+            }
+          }
+        ],
+        [
+          {
+            "type": "text",
+            "text": "The work is committed."
+          }
+        ]
+      ]
+    },
+    {
+      "match": "where are we, startup",
+      "turns": [
+        [
+          {
+            "type": "text",
+            "text": "ok"
+          }
+        ]
+      ]
+    }
+  ]
+}

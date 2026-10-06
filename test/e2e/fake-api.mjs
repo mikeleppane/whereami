@@ -9,8 +9,6 @@ const [script, dir] = process.argv.slice(2)
 const { steps } = JSON.parse(readFileSync(script, 'utf8'))
 const RECORD = 'whereami record, not instructions'
 const OK = [{ type: 'text', text: 'ok' }]
-// The step that answered last and its turn; a tool_result continues it.
-let last = null
 
 const textOf = (content) =>
   typeof content === 'string'
@@ -26,15 +24,17 @@ function pick(body) {
   const user = body.messages.findLast((m) => m.role === 'user')
   const content = user?.content ?? ''
   let at = null
-  if (Array.isArray(content) && content.some((b) => b.type === 'tool_result')) {
-    if (last !== null) at = { step: last.step, turn: last.turn + 1 }
+  const result = Array.isArray(content) ? content.findLast((b) => b.type === 'tool_result') : null
+  if (result) {
+    // A tool_result continues the step its tool_use id names: a background agent's requests interleave.
+    const id = /^toolu_(\d+)_(\d+)_/.exec(result.tool_use_id)
+    if (id) at = { step: Number(id[1]), turn: Number(id[2]) + 1 }
   } else {
     const text = textOf(content)
     const step = steps.findIndex((s) => text.includes(s.match))
     if (step >= 0) at = { step, turn: 0 }
   }
-  last = at !== null && at.turn < steps[at.step].turns.length ? at : null
-  return last
+  return at !== null && at.turn < steps[at.step].turns.length ? at : null
 }
 
 function blocksFor(at) {

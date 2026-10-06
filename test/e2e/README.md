@@ -2,7 +2,8 @@
 
 Each way runs the pinned Claude Code (`node_modules/.bin/claude`, 2.1.289) in `tmux` against `fake-api.mjs`, a local
 stand-in for the Anthropic API that replays the way's scripted model turns. Stand-in `superpowers` and
-`mattpocock-skills` plugins sit in `plugins/`. No login, no network, no cost.
+`mattpocock-skills` plugins sit in `plugins/`, with `polite-band`, another plugin's band for way 11; `PLUGINS` in
+`lib.sh` says which load after whereami. No login, no network, no cost.
 
 ```sh
 make e2e              # every way
@@ -20,14 +21,15 @@ way fails, `screen.txt` (the pane with its scrollback) and `repo/`.
   (`null` for the plain `ok`), `record` (how many times the body holds `whereami record, not instructions`), `tools`
   and `final` (the answer ends the turn).
 - `ways/<name>.json`: `{ "steps": [ { "match": "<text>", "turns": [ [<content blocks>], … ] } ] }`. A prompt
-  containing `match` starts that step at turn 0; a `tool_result` continues the step that answered last; anything else,
-  or a request without `tools`, gets `ok`. `tool_use` ids are `toolu_<step>_<turn>_<i>`, so a step said twice in one
+  containing `match` starts that step at turn 0; a `tool_result` continues the step its `tool_use_id` names (a
+  background agent's requests interleave with the main loop's); anything else, or a request without `tools`, gets
+  `ok`. `tool_use` ids are `toolu_<step>_<turn>_<i>`, so a step said twice in one
   conversation (a resumed or branched one included) repeats its ids: give each prompt its own step.
 - `ways/<name>.sh`: sources `lib.sh` and drives one way; `run.sh` runs them and prints `e2e: N passed, M failed`.
 
 ## What Claude Code 2.1.289 does here
 
-Read from `claude --help` and seen in runs of way 10:
+Read from `claude --help` and seen in runs of the ways:
 
 - `--plugin-dir` repeats (`--plugin-dir A --plugin-dir B`): the stand-in skills are listed next to whereami's.
 - `--session-id <uuid>` names a new session; `--resume <uuid>` reopens it, and `/branch [name]` creates a branch of
@@ -40,7 +42,16 @@ Read from `claude --help` and seen in runs of way 10:
   those starts, as a real resume after work would.
 - A `tool_use` whose id is already in the conversation is not run: Claude Code sends it back as
   `[Tool use interrupted]` with a user turn `(no content)` and no `tool_result`.
-- The prompt line starts with `❯`; dialogs indent theirs.
+- The prompt line starts with `❯`; dialogs indent theirs. With text in the box, a no-break space follows the `❯`.
+- `/whereami` opens its pane as a column right of a `│`, about 49 wide, so its lines wrap: `pane` in `lib.sh` joins
+  them. `ctrl+x tab` gives the pane the keys and `Down` moves to its first button, but not while a dialog such as the
+  `/model` picker is up; an SGR mouse click (`ESC[<0;col;rowM`, then `m`) presses a button then too, though a click
+  is now and then dropped.
+- A typed skill command (`/mattpocock-skills:implement <path>`) sends the model a prompt holding its arguments, so a
+  step can match the path. `Write` takes a path relative to the session's folder.
+- `/exit` while a background agent runs asks first ("Exit and stop tasks"); Enter stops the agent and ends the
+  session.
+- `claude -p` ends right after its last tool call, well inside the second a refresh waits out.
 - `claude -p "/exit"` prints "/exit isn't available in this environment." but runs the session start, so it saves a
   branch summary with no model call.
 - The seeded `~/.claude.json` (onboarding done, theme, key `sk-fake` approved, the repo trusted) skips the first-run

@@ -1,0 +1,30 @@
+{
+  "steps": [
+    {
+      "match": "build the plan",
+      "turns": [
+        [
+          {
+            "type": "tool_use",
+            "name": "Skill",
+            "input": {
+              "skill": "superpowers:subagent-driven-development",
+              "args": "docs/superpowers/plans/2026-10-05-demo-build.md"
+            }
+          }
+        ],
+        [
+          {
+            "type": "tool_use",
+            "name": "Bash",
+            "input": {
+              "command": "mkdir -p .superpowers/sdd/demo && printf 'docs/superpowers/plans/2026-10-05-demo-build.md\\n' >.superpowers/sdd/demo/plan-path && printf '# SDD ledger — plan: docs/superpowers/plans/2026-10-05-demo-build.md\\nTask 1: complete (commits a..b, review clean)\\n' >.superpowers/sdd/demo/progress.md",
+              "description": "Start the ledger with Task 1"
+            }
+          }
+        ],
+        [{ "type": "text", "text": "Task 1 is done." }]
+      ]
+    }
+  ]
+}

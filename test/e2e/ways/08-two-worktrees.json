@@ -1,0 +1,77 @@
+{
+  "steps": [
+    {
+      "match": "build plan a",
+      "turns": [
+        [
+          {
+            "type": "tool_use",
+            "name": "Skill",
+            "input": {
+              "skill": "superpowers:subagent-driven-development",
+              "args": "docs/superpowers/plans/2026-10-05-a.md"
+            }
+          }
+        ],
+        [
+          {
+            "type": "tool_use",
+            "name": "Bash",
+            "input": {
+              "command": "mkdir -p .superpowers/sdd/a && printf 'docs/superpowers/plans/2026-10-05-a.md\\n' >.superpowers/sdd/a/plan-path && printf '# SDD ledger — plan: docs/superpowers/plans/2026-10-05-a.md\\nTask 1: complete (commits a..b, review clean)\\n' >.superpowers/sdd/a/progress.md",
+              "description": "Write the ledger of a"
+            }
+          }
+        ],
+        [
+          {
+            "type": "text",
+            "text": "Plan a is under way."
+          }
+        ]
+      ]
+    },
+    {
+      "match": "build plan b",
+      "turns": [
+        [
+          {
+            "type": "tool_use",
+            "name": "Skill",
+            "input": {
+              "skill": "superpowers:subagent-driven-development",
+              "args": "docs/superpowers/plans/2026-10-05-b.md"
+            }
+          }
+        ],
+        [
+          {
+            "type": "tool_use",
+            "name": "Bash",
+            "input": {
+              "command": "mkdir -p .superpowers/sdd/b && printf 'docs/superpowers/plans/2026-10-05-b.md\\n' >.superpowers/sdd/b/plan-path && printf '# SDD ledger — plan: docs/superpowers/plans/2026-10-05-b.md\\nTask 1: complete (commits a..b, review clean)\\nTask 2: complete (commits a..b, review clean)\\n' >.superpowers/sdd/b/progress.md",
+              "description": "Write the ledger of b"
+            }
+          }
+        ],
+        [
+          {
+            "type": "text",
+            "text": "Plan b is under way."
+          }
+        ]
+      ]
+    },
+    {
+      "match": "where are we, startup",
+      "turns": [
+        [
+          {
+            "type": "text",
+            "text": "ok"
+          }
+        ]
+      ]
+    }
+  ]
+}
